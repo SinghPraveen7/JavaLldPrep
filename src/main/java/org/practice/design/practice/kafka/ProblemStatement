@@ -1,0 +1,66 @@
+Design an in-memory message queue (similar to a scaled-down Kafka or RabbitMQ) that supports a publisher-subscriber model,
+but with the added complexity of Consumer Groups and Fault Tolerance.
+Functional Requirements:
+Topic Management: Users should be able to create topics.
+Producer: Producers can publish messages to a specific topic.
+Consumer: Consumers can subscribe to a topic.
+Consumer Groups (The core challenge):
+Consumers can belong to a "Consumer Group."
+Broadcast Mode: If consumers are in different groups, a message published to the topic is broadcast to all groups (every group gets a copy).
+Point-to-Point Mode: If multiple consumers are in the same group, a message published to the topic is delivered to only one available consumer in that group.
+Retry & DLQ: If a consumer throws an exception while processing a message, the broker should retry delivering it a configurable number of times.
+If it exhausts the retries, the message should be moved to a Dead Letter Queue (DLQ).
+
+
+Entity:
+
+Topic: class
+topicId
+topicName
+List<Message>
+Map<String, ConsumerGroup>
+publish(Message)
+Message read()
+addConsumers(ConsumerGroup)
+
+ConsumerGroup: class
+ConsumerGroupId
+Topic
+List<Consumer>
+BlockingQueue<Message> MessageQueue
+BlockingQueue<DeadQueueEntry>DeadQueue
+dispatcherThread
+startDispatching()
+dispatchMessage(Message) // strategy
+maximumRetry
+offset
+handleRetry(message)
+addConsumers(Consumer)
+pushToGroup(Message)
+pushToDeadQueue(Message)
+
+Consumer: class
+ConsumerId
+boolean consumeMessage(Message)
+
+Producer: class
+ProducerId
+publishMessage(Message, Topic)
+
+Message: class -> Need to deliver copy of message to CG
+messageId
+data // Immutable
+timestamp
+
+Broker: class
+Map<TopicId, Topic>
+TopicId addTopic(TopicId, TopicName)
+subscribe(Topic, ConsumerGroup)
+unSubscribe(Topic, ConsumerGroup)
+
+DeadQueueEntry: class
+Message
+TopicId
+ConsumerGroupId
+AttemptMade
+Timestamp

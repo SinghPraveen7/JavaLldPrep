@@ -1,0 +1,36 @@
+PROBLEM STATEMENT: DESIGN STACK OVERFLOW (LOW-LEVEL DESIGN)
+
+Design an in-memory Object-Oriented system for a Q&A platform like Stack Overflow.
+The system should allow users to post questions, submit answers, add comments,
+vote on posts, and gain reputation points.
+
+
+1. FUNCTIONAL REQUIREMENTS
+User Management:
+  * Users can create profiles and hold a reputation score.
+  * System should support roles (e.g., Guest, Member, Moderator).
+
+Content Creation:
+  * A user can post a Question with a title, body, and 1 to 5 Tags.
+  * A user can post an Answer to a specific Question.
+  * A user can add a Comment to a Question or an Answer.
+
+Voting & Acceptance:
+  * Users can Upvote or Downvote Questions and Answers.
+  * Users can Upvote Comments.
+  * The question author can select exactly one Answer as "Accepted".
+  * Users cannot vote on their own posts, nor vote twice on the same post.
+
+Reputation & Badges:
+  * Question Upvoted: +10 points to question author.
+  * Answer Upvoted: +10 points to answer author.
+  * Answer Accepted: +15 points to answer author, +2 points to question author.
+  * Question/Answer Downvoted: -2 points to post author.
+
+Search & Filtering:
+  * Users can search questions by Keyword, Tag, or Author.
+  * Questions can be sorted by Recent, Top Voted, or Unanswered.
+
+Notifications:
+  * Notify question authors when an answer or comment is added.
+  * Notify answer authors when their answer is accepted or commented on.

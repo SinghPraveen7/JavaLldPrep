@@ -1,0 +1,11 @@
+What happened to when we enter any URL to browser?
+
+1. URL is mapped to IP address (either from browser cache, ISP and DNS servers (cloudflare), read: recursive DNS lookup)
+2. Once found, connection is established to transfer data
+3. Once established, CDN delivers static resource (to reduce latency)
+4. Then the request pass through the firewall (read: web application firewall)
+5. Then the request reach to API gateway/load balancer layer. (read: L7 and L4 load balancing, OSI layers)
+6. Based on load balancing algo, request will be routed to one server
+7. API server process request and connects to data layer (based on request type).
+8. Once done, response is prepared and returned through same route.
+9. Browser receive the response and render screen.

@@ -1,0 +1,61 @@
+LLD Problem Statement: Design an Expense Sharing Application
+
+System Overview: Design an in-memory backend for an expense-sharing application like Splitwise. The system should allow users to add expenses,
+split them among friends using various methods, and track who owes whom. It should also support group expenses and a feature to minimize
+the number of transactions required to settle all debts.
+
+1. Core Requirements (Must-Have)
+Your application should be able to handle the following flows:
+User Management: Register users with their basic details (ID, Name, Email).
+Group Management: Users should be able to create groups and add other users to them.
+Add Expenses: A user can add an expense paid by them, split among a specific set of users (or a group).
+Split Types: The system must support the following split strategies:
+EQUAL: Split equally among all participants.
+EXACT: Specify the exact amount each participant owes.
+PERCENT: Specify the percentage of the total each participant owes. (Must validate that percentages add up to 100).
+Passbook / Balances:
+Show the balances for a single user (e.g., "User A owes User B 50", "User C owes User A 100").
+Show the total balances for all users in the system or within a specific group.
+Simplify Debts (Crucial Algorithmic Component): A feature that recalculates and optimizes the balances within a group to minimize
+the total number of cash transactions needed to settle up. (e.g., If A owes B $10 and B owes C $10, it should simplify to A owes C $10).
+
+Entities:
+
+User: class
+id, name, email
+
+Group: class
+id, name, List<User> users, Passbook passbook
+
+SplitType: Enum
+EQUAL, EXACT, PERCENT
+
+Passbook: class
+passbookId
+Map<User, Map<User, Double>> balanceSheet
+
+Split: class
+User user
+double amountOwed
+
+SplitStrategy: interface implemented by: equalSplit, exactSplit, percentSplit
+Split calculateSplit(Expense)
+
+Expense: class
+User paidBy, double amount, List<User> participant, List<Double> values, SplitType
+
+ExpenseManager: class
+SplitStrategy
+addExpense(expense)
+updatePassbookBalance()
+simplifyExpense()
+
+List<Payment> simplify(Map<String, Double> netBalances) {
+    // Use a max-heap of creditors (net > 0) and a max-heap of debtors (net < 0)
+    // Repeatedly: pop biggest creditor + biggest debtor,
+    //   settle = min(creditor, |debtor|), record a Payment,
+    //   push back whoever still has a leftover balance.
+}
+
+"I'll use the greedy heuristic. It's O(n log n), gives near-optimal results in practice,
+and I'm consciously trading provable optimality for speed and simplicity — the exact solution isn't worth exponential time for a settle-up button."

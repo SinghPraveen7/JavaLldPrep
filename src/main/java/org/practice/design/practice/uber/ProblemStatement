@@ -1,0 +1,39 @@
+Problem Statement:
+Design the core Low-Level system for a Ride-Sharing service (like Uber).
+Core Requirements:
+Rider: Can request a ride from a source to a destination. Can see the estimated fare before booking.
+Driver: Can go online/offline. Can accept or reject a ride request. Can update the ride status (In-progress, Completed).
+Ride Matching: The system should match a rider with an available driver based on specific criteria (e.g., nearest driver).
+Pricing: The fare should be calculated based on the distance.
+The system must support dynamic pricing (Surge pricing during peak hours, Standard pricing otherwise).
+
+Entities:
+
+Location:
+Lat
+Long
+
+Rider:
+id, name
+
+Driver:
+Location, id, updateLocation(), name
+
+Ride:
+Location source, Location destination, RideStatus status, double EstimatedFare
+
+RideStatus:
+REQUESTED, IN_PROGRESS, COMPLETED
+
+LocationService:
+updateDriverLocation(Location driverLocation)
+findNearbyDriver(Location sourceLocation)
+
+RideService:
+requestRide(Ride ride)
+boolean acceptRide(Ride ride)
+sendRideRequest(Driver driver, Ride ride)
+
+PriceService:
+double estimatePrice(Ride ride)
+

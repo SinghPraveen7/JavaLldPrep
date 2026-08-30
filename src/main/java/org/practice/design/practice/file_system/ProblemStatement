@@ -1,0 +1,50 @@
+Design an In-Memory File System. ->
+Design an object-oriented file system that exists in memory. The system should support the following operations:
+ls(String path): Given a path, if it is a file path, return a list containing just the file's name.
+If it is a directory path, return a list of all files and directory names in that directory. The output should be sorted lexicographically.
+mkdir(String path): Create a new directory according to the given path. If the intermediate directories in the path do not exist, create them as well.
+addContentToFile(String filePath, String content): Given a file path and file content in string format, append the content to the existing file.
+If the file does not exist, create a new file containing the given content.
+readContentFromFile(String filePath): Given a file path, return its string content.
+
+Entities:
+
+FileManagementSystem:
+APIs:
+ls(String path)
+mkdir(String path)
+addContentToFile(String filePath, String content)
+readContentFromFile(String filePath)
+
+ContentMetaData:
+int size
+
+Content:
+String name
+ContentMetaData metaData
+
+Directory extends Content:
+Map<String, Content> contentMapping
+
+File extends Content:
+String data
+
+A -> B C D
+D -> E F
+F -> G H
+
+A -> {Set{B,C,D}, files, parent = null}
+D -> {Set{E,F}, Set{file1, file2... file1000}, parent = A}
+F -> {Set{G,H}, Set{file.txt}, parent = D}
+
+path -> A/D/F/H
+
+path -> A/D/F -> ls
+
+path -> A/D/F/file.txt
+
+path -> A/K/C/F/D --> Fail case
+
+TreeMap
+
+Composite Design Pattern

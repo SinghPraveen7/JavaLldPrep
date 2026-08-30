@@ -1,0 +1,92 @@
+Designing the Low-Level Design (LLD) for an Amazon-style shopping cart requires handling state management,
+complex pricing logic, and concurrency.
+
+Functional Requirements:
+Add/Remove: Users can add products to the cart or remove them.
+Update Quantity: Users can increase or decrease the quantity of a specific item.
+Calculate Total: The system must calculate the total price, including taxes, shipping, and discounts.
+Guest vs. Logged-in: The cart must work for guest users and seamlessly merge with their account cart when they log in.
+Save for Later: Users can move items out of the active cart to purchase later.
+Non-Functional Requirements:
+Highly Available: The cart is on the critical path to purchase; it cannot go down.
+Low Latency: Adding an item to the cart must feel instantaneous.
+Concurrency: Handling scenarios where a user updates the cart from multiple devices simultaneously.
+
+Corner cases: while login, no locking while in cart, price volatile, price change alerts, merging cart case
+Device1: A B C
+Device2: B C D
+
+Entity:
+
+User:
+userId, userName, cart
+
+Product:
+productId, productName, price
+
+Cart:
+cartId, Map<Product, CartItem>, price
+
+CartItem:
+cartItemId, productId, quantity, timestamp
+
+CartPrice:
+cart, calculatePrice()
+
+SaveForLaterCart:
+savedId, Map<Product, SavedItem>, price
+
+SavedItem:
+savedItemId, productId, quantity, timestamp
+
+CartService:
+Map<String, Cart> activeCarts;
+Map<String, SaveForLaterCart> saveForLaterCarts;
+addItemToCart(productId, userId)
+removeFromCart()
+updateCart()
+fetchCart()
+moveItemToSaveLater(productId, userId)
+
+User -> select Product -> 1 save for later -> 2 add to cart
+
+Cart Service:
+req:  {
+          "cartId": "13435",
+          "cartItems": [
+              {
+                  "cartItemId": "13422",
+                  "productId": "13433",
+                  "quantity": 4,
+                  "timestamp": 12343545,
+                  "price": 2343
+              }
+          ],
+          "price": 12312.12
+      }
+
+resp: {
+          "success": true/false,
+          "cartId": 12132,
+          "priceStrategy": {
+               "shippingCharges": 12,
+               "discount": 7
+          },
+          "cartItems": [
+                        {
+                            "cartItemId": "13422",
+                            "productId": "13433",
+                            "productDesc": "description",
+                            "productImageUrl": "https://..."
+                            "quantity": 4,
+                            "timestamp": 12343545,
+                            "price": 2342,
+                            "maxAllowed": 3,
+                            "stock": 10
+                        }
+                    ]
+      }
+
+
+
+

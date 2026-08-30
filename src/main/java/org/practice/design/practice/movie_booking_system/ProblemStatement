@@ -1,0 +1,41 @@
+Problem Statement: Design a Movie Ticket Booking System
+Overview:
+Design the core classes, interfaces, and low-level architecture for a movie ticket booking system (similar to BookMyShow or Fandango).
+The system should allow users to browse movies, select a cinema, choose a showtime, and book specific seats.
+Core Requirements:
+Cities, Cinemas, & Screens: The system should support multiple cities. Each city has multiple cinemas, and each cinema has multiple screens (halls).
+Movies & Shows: A cinema can run multiple shows for different movies simultaneously. A movie has standard attributes (title, language, genre, duration).
+A show is a specific screening of a movie at a specific time on a specific screen.
+Seat Selection & Pricing: Screens have a specific layout of seats.
+Seats can be of different categories (e.g., Standard, Premium, VIP), and pricing should dynamically reflect the seat category.
+Booking Process: Users should be able to select available seats for a show and initiate a booking.
+Concurrency Handling (Crucial): The system must handle high concurrency.
+Two users cannot book the same seat for the same show simultaneously.
+When a user selects a seat and proceeds to payment, the seat must be temporarily locked (e.g., for 10 minutes).
+If the payment fails or times out, the seat must become available again.
+
+Out of Scope (Do not implement):
+User authentication and profile management.
+Actual payment gateway integration (assume a mock PaymentService exists).
+Recommendation engines or notification systems.
+
+===========================================================================================================================
+My Solution :-
+
+Entities:
+user (userId, List<Ticket>, name)
+city (cityId, name)
+cinema (cinemaId, name, cityId)
+screen (screenid, cinemaId, name)
+seat (seatNo, screenId, SeatType)
+SeatType (Standard, Premium, VIP)
+Pricing (Dynamic -> should be strategy at runtime)
+show (showId, movieId, startTime, endTime, screenId)
+movie (movieId, title, language, genre, duration)
+order/ticket (orderId, orderTime, List<seats>, show, status, userId)
+payment (status, paymentId, amount)
+PaymentService (processPayment())
+
+User journey:
+select movie -> select cinema -> select screen -> select seat -> lock seat -> move to payment ->
+if (selected seat available) -> do payment -> check seat lock status (10 min timeout) -> confirm order -> create ticket

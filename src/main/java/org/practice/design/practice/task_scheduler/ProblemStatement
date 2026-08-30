@@ -1,0 +1,30 @@
+Design an in-memory Task Scheduler (similar to Java’s ScheduledThreadPoolExecutor).
+Requirements:
+Support scheduling one-time tasks to execute after a given delay.
+Support scheduling recurring tasks to execute periodically at fixed intervals.
+Support canceling a scheduled task before it executes.
+Ensure the design is thread-safe so multiple clients can submit tasks concurrently.
+Optimize for CPU usage (prevent busy-waiting/spinning when worker threads have no immediate tasks).
+Ensure fault tolerance (if a client's task throws an exception, it should not crash the worker thread).
+
+
+Entities:
+
+Task: class
+run()
+
+TaskType: enum
+onetime, recurring
+
+scheduledTask: class implement Comparable
+
+WorkerThread: class
+
+TaskScheduler: class
+
+ThreadPool: class
+Queue<WorkerThread> threads
+addThreadToQueue(WorkerThread workerThread)
+pollFromQueue(WorkerThread workerThread)
+
+ScheduledThreadPoolExecutor: class

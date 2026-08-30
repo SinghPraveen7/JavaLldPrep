@@ -1,0 +1,74 @@
+Design the backend models and services for a live cricket scoring application.
+The system needs to track the state of a cricket match ball-by-ball, update the scorecard in real-time, and serve this data to front-end clients.
+
+Core Requirements:
+Match Tracking: The system must model a cricket match involving two teams, a specific format (e.g., T20, ODI), and track the current state of the match
+ (Scheduled, In Progress, Completed, Abandoned).
+Ball-by-Ball Granularity: Track every ball bowled in an over. A ball can result in normal runs, extras (Wide, No-Ball, Leg-Bye),
+and wickets (Bowled, Caught, Run Out, etc.).
+Dynamic Scorecard: Maintain a live scorecard that instantly reflects:
+Total team score and wickets.
+Current Run Rate (CRR).
+The current striker and non-striker with their individual scores.
+The current bowler's figures (Overs, Maidens, Runs, Wickets).
+Real-Time Updates : The system must push live score updates and ball-by-ball commentary to subscribed clients or
+dashboards whenever a ball is bowled, without the client needing to constantly poll the database.
+
+Entity:
+
+Match: class
+Id, MatchFormat, TeamA, TeamB, MatchStatus, Scorecard, Time, Place, List<Innings>
+
+Inning: class
+TeamBat, TeamBowl, List<Over> overs, totalRun, totalWickets
+
+MatchFormat: Enum
+T20, ODI, TEST
+
+MatchStatus: Enum
+Scheduled, In Progress, Completed, Abandoned
+
+Ball: class
+BallType ballType, Integer score, Player bowledBy, Integer ballNumber, Player facedBy, RunType runType, Wicket wicket, boolean isValidBall
+
+Wicket: class
+Player dismissed, Player dismissedBy, WicketType type, Player caughtBy
+
+Over: class
+List<Ball> balls, Integer overNumber
+
+BallType: Enum
+Wide, No-Ball, Leg-Bye, Normal
+
+WicketType: Enum
+Bowled, Caught, Run-Out, LBW, Stump, RetiredHurt
+
+RunType: Enum
+Bye, LegBye, overthrow, no-ball, wide, normal
+
+ScoreCard: class
+Player striker, Player non-striker, Map<String, BattingStats> battingStats, Map<String, BowlStats> bowlingStats, Map<String, Ball> wicketFallen
+
+BattingStats: class
+Integer score, Integer fours, Integer sixes, Integer bowlFaced, boolean isDismissed, String dismissedBy
+
+BowlStats: class
+Integer Overs, Integer Maidens, Integer Runs, Integer Wickets
+
+Team: class
+List<Player> players, String teamId, String teamName
+
+Player: class
+String playerId, String playerName, PlayerRole role
+
+PlayerRole: Enum
+Batsman, Bowler, All-rounder, wicket-keeper
+
+Subject: interface
+addObserver(ScoreObserver), removeObserver(ScoreObserver), notifyObserver()
+
+CommentaryService: class implements Subject
+recordBall(Ball ball) {notifyObserver()}
+
+ScoreObserver: interface
+updateScore(Match match, ScoreCard scoreCard)

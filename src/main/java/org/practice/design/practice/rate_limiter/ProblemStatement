@@ -1,0 +1,7 @@
+               Rate Limiter
+              --------------
+      /     /      |      \      \
+ Fixed   Sliding  Token   Leaky   Sliding
+ Window    Log    Bucket  Bucket   Counter
+
+

@@ -1,0 +1,14 @@
+The Problem:
+Design an Intelligent LLM Gateway & Router
+Design an in-memory LLM Gateway that intercepts incoming user prompts, processes them through optimization layers, and routes them
+to the best available LLM provider based on a chosen strategy.
+
+Core Requirements:
+Multi-Provider Abstraction: Support multiple upstream AI models (e.g., OpenAI, Anthropic, or a local Llama model) via a unified interface.
+Semantic Caching: Before hitting a costly LLM, check an in-memory semantic cache. If a previous prompt is semantically similar (e.g., proximity score > 90%),
+return the cached answer to save time and money.
+Token Rate Limiting: Implement a token-bucket rate limiter per API Key based on the estimated token size of the prompt, not just request counts.
+Resilience (Circuit Breaker & Fallback): If a provider fails repeatedly or gets rate-limited by the upstream service, trip a circuit breaker and
+automatically fall back to an alternative model.
+Dynamic Routing Strategies: Support switching between routing strategies: Lowest Cost, Lowest Latency, or Strict Priority (Failover).
+

@@ -1,0 +1,6 @@
+Design a parking lot system with following requirements:
+
+Consider 3 types of vehicles parking is available i.e. small, medium and large.
+Parking lot has multiple entrance and exit.
+Consider fare hourly basis.
+

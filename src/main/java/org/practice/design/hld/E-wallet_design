@@ -1,0 +1,221 @@
+Interviewer: "Design a Digital Wallet system — like Paytm, PayPal Wallet, or Google Pay — supporting 100M users with very low latency."
+
+This is a different flavor of problem from what we've done so far. In a URL shortener, losing a redirect once in a while is annoying. In a wallet, losing or duplicating even one transaction is a business-ending bug. Correctness comes before everything else — latency and scale are the second priority, not the first. Keep that principle in your head through the whole design; it's what the interviewer is really testing.
+
+Step 1 — Clarify requirements (always first)
+
+You ask:
+
+Q: What are the core operations?
+Interviewer: "Add money (top-up from bank/card), withdraw to bank, peer-to-peer transfer, pay a merchant, check balance, view transaction history."
+
+Q: Can the wallet ever go negative, or double-spend?
+Interviewer: "Never. That's the #1 constraint."
+
+Q: What's the scale?
+Interviewer: "100M registered users, ~10% daily active."
+
+Q: What latency do we need?
+Interviewer: "Balance check under 50ms. A transfer should feel instant to the user — under 500ms."
+
+Q: Do we integrate with real banks/card networks for top-up/withdraw?
+Interviewer: "Yes, via a payment gateway partner."
+
+You summarize: "So — strong correctness guarantees, 100M users with ~10M DAU, sub-50ms balance reads, sub-500ms transfers, and external bank rails for money in/out. Given the correctness requirement, I want to flag early: this system is fundamentally a CP system in CAP terms — I will never trade correctness for availability. I'll design accordingly."
+
+That one sentence — naming CAP theorem and picking CP explicitly — is exactly the kind of thing that signals "this candidate has real judgment," not just memorized patterns.
+
+Step 2 — Capacity estimation
+100M registered users → 10M DAU
+Avg 3 money-movement transactions/user/day → 30M transactions/day
+
+Write TPS:
+  30M / 86,400 sec ≈ 350 TPS average
+  Peak (lunch/evening, ~10x)  ≈ 3,500 TPS peak
+
+Balance checks (reads, users check more than they transact — say 5x):
+  150M reads/day ≈ 1,700 reads/sec average
+  Peak ≈ 15,000 reads/sec
+
+Storage per transaction (1 txn record + 2 ledger entries ≈ 450 bytes):
+  30M/day × 450 bytes ≈ 13.5 GB/day ≈ ~5 TB/year
+  7-year regulatory retention ≈ ~35 TB (hot + cold tiers)
+
+Say out loud: "Write volume is modest — 3,500 TPS peak is well within a properly indexed relational database. Read volume for balance checks is the thing that needs caching. This tells me: put real engineering effort into correctness of the write path, and solve latency on the read path with a cache."
+
+Step 3 — High-level architecture
+Step 4 — The core problem: how do you move money correctly?
+
+This is where the interview lives or dies. Everything else is standard system design; this part is wallet-specific.
+
+The double-entry ledger
+
+Never store just a balance column and mutate it blindly. Every real money system uses double-entry bookkeeping — every transaction produces exactly two immutable ledger rows: a debit from one wallet, a credit to another. The sum of all entries in the system is always zero. This gives you an audit trail and makes reconciliation mathematically checkable — not something you build later, something you get for free.
+
+sql
+CREATE TABLE wallets (
+    wallet_id   BIGINT PRIMARY KEY,
+    user_id     BIGINT NOT NULL,
+    balance     BIGINT NOT NULL,   -- store as smallest currency unit (paise/cents), never floats
+    version     BIGINT NOT NULL DEFAULT 0,   -- for optimistic locking
+    status      VARCHAR(10) DEFAULT 'ACTIVE'
+);
+
+CREATE TABLE ledger_entries (           -- append-only, never updated or deleted
+    entry_id       BIGINT PRIMARY KEY,
+    transaction_id BIGINT NOT NULL,
+    wallet_id      BIGINT NOT NULL,
+    entry_type     VARCHAR(6) NOT NULL, -- 'DEBIT' or 'CREDIT'
+    amount         BIGINT NOT NULL,
+    balance_after  BIGINT NOT NULL,
+    created_at     TIMESTAMP NOT NULL
+);
+
+CREATE TABLE transactions (
+    transaction_id   BIGINT PRIMARY KEY,
+    idempotency_key  VARCHAR(64) UNIQUE NOT NULL,  -- the safety net
+    sender_wallet_id   BIGINT,
+    receiver_wallet_id BIGINT,
+    amount           BIGINT NOT NULL,
+    status           VARCHAR(12) NOT NULL, -- PENDING/RESERVED/COMPLETED/FAILED
+    created_at       TIMESTAMP NOT NULL
+);
+
+Never store money as a float or double. Rounding errors compound. Store integer smallest-unit amounts (paise, cents) — this is a real production gotcha interviewers love probing.
+
+The race condition every candidate must be able to explain
+
+Two requests hit "debit $80" on a wallet with $100 balance at the same instant — say a flaky client retried the request, or two devices sent it.
+
+Naive (broken) code:
+
+java
+// DON'T DO THIS
+Wallet w = walletRepo.findById(id);      // both threads read balance=100
+if (w.getBalance() >= 80) {              // both pass the check
+    w.setBalance(w.getBalance() - 80);   // both compute 100-80=20
+    walletRepo.save(w);                  // last write wins: balance ends at 20
+}
+// Result: $160 was "spent" from a $100 wallet. Classic lost update.
+
+Fix 1 — pessimistic row locking (simplest, correct):
+
+java
+@Transactional
+public void debit(Long walletId, long amount) {
+    Wallet w = walletRepo.findByIdForUpdate(walletId); // SELECT ... FOR UPDATE
+    if (w.getBalance() < amount) throw new InsufficientBalanceException();
+    w.setBalance(w.getBalance() - amount);
+    walletRepo.save(w);
+}
+
+SELECT FOR UPDATE locks the row. The second thread's SELECT FOR UPDATE blocks until the first transaction commits, then sees the updated balance and correctly rejects the second debit. This is the direct application of ACID Isolation from Week 2 — and it's why the wallet DB has to be a real relational database with row-level locking, not a document store.
+
+Fix 2 — optimistic locking (better under high contention on the same row):
+
+sql
+UPDATE wallets
+SET balance = balance - 80, version = version + 1
+WHERE wallet_id = 123 AND version = 7 AND balance >= 80;
+-- If 0 rows affected → someone else updated it first. Re-read and retry.
+
+This avoids holding a lock while waiting — cheaper under high concurrency, but requires retry logic in the app. For a wallet system with 3,500 TPS peak spread across millions of distinct wallets, contention per wallet is actually low (the same person rarely fires 10 simultaneous transactions), so either approach works — pessimistic locking is simpler to reason about and is what I'd pick as the default.
+
+Idempotency — the other half of correctness
+
+Networks fail. A client sends "transfer $50," the server processes it successfully, but the response times out on the way back. The client — not knowing it succeeded — retries. Without protection, you've now sent $100.
+
+java
+@Transactional
+public TransactionResult transfer(TransferRequest req, String idempotencyKey) {
+    // Check first — cheap, indexed unique lookup
+    Optional<Transaction> existing = txnRepo.findByIdempotencyKey(idempotencyKey);
+    if (existing.isPresent()) {
+        return existing.get().toResult();   // return the SAME result, don't reprocess
+    }
+
+    // ... perform the debit + credit + ledger writes ...
+    // Insert the transaction row with this idempotency_key as part of the SAME DB transaction
+}
+
+The idempotency_key is a client-generated UUID sent as a header on every mutating request. The UNIQUE constraint on that column is your real safety net — even if two requests race past the initial check simultaneously, the database rejects the second INSERT with a constraint violation, and you catch that and return the cached result. This is a standing pattern you should mention any time money, orders, or anything non-repeatable is involved — it comes up constantly in fintech interviews specifically.
+
+Step 5 — Scaling to 100M users: the cross-shard transfer problem
+
+At this scale, wallets and ledger_entries are sharded by wallet_id (consistent hashing, from Week 4) across, say, 64 shards. This creates the hardest problem in the whole design:
+
+Most P2P transfers are between two different users whose wallets land on two different shards. You cannot wrap a debit-on-shard-A and a credit-on-shard-B in one local ACID transaction — that's exactly the cross-shard transaction problem from Week 2.
+
+The Saga pattern — reserve, then confirm
+
+Talk through it to the interviewer:
+
+"Step 1 — reserve — is a local ACID transaction on the sender's shard: debit the balance, write a ledger entry marked PENDING. This is fast and fully consistent within that shard. This step alone gives us the strongest correctness guarantee we need: the sender's money is now provably held and can't be spent twice, even if the rest of the saga is still in flight.
+
+Step 2 publishes an event to Kafka. Step 3 — the receiver-shard consumer — credits the receiver atomically. Step 4 confirms both sides as COMPLETED.
+
+If step 3 fails — receiver wallet doesn't exist, is frozen, whatever — we run a compensating transaction: credit the reserved amount back to the sender and mark the transaction FAILED. At no point does money disappear or get duplicated, because every step is a local ACID operation and the ledger entries record the full state machine of the transfer."
+
+This is exactly the Saga pattern from distributed systems — the same category of solution used at PayPal, Uber, and every large fintech for exactly this reason. Naming "Saga pattern" explicitly is a strong signal.
+
+Same-shard transfers (which do happen — e.g., merchant payments where the merchant pool sits on a fixed set of shards) skip the saga entirely and use one local ACID transaction — sub-50ms, no Kafka round trip needed.
+
+Step 6 — Low latency, without breaking correctness
+
+Balance reads (the 15,000/sec peak): Redis, write-through. The cache is updated synchronously, in the same request that commits the DB transaction — not lazily. This means read-your-own-write is automatic: the moment a transfer commits, the next balance check (even milliseconds later) sees the new number. Cache-aside with async population is wrong here — the staleness window it introduces is unacceptable for money.
+
+java
+@Transactional
+public void debit(Long walletId, long amount) {
+    Wallet w = walletRepo.findByIdForUpdate(walletId);
+    // ... balance update, ledger write, all in this DB transaction ...
+    walletRepo.save(w);
+
+    // After commit (e.g. via @TransactionalEventListener), update cache
+    redis.set("balance:" + walletId, w.getBalance());
+}
+
+Transaction history: paginated reads, served from read replicas — this data is append-only and slightly-stale-is-fine, unlike balance.
+
+Fraud/velocity checks: a Redis-backed token bucket (Week 4) checks "has this user exceeded N transactions in the last minute / ₹X in the last day" — a fast in-line check before the debit even starts, rejecting abuse before it touches the ledger DB at all.
+
+Payment gateway calls (top-up/withdraw): wrapped in a circuit breaker (Week 4) — if the bank's API is slow or down, fail fast, queue the request, and notify the user asynchronously rather than let 3,500 threads hang waiting on an external dependency.
+
+Step 7 — Reconciliation (the safety net under everything)
+
+Even with all this correctness engineering, run a nightly batch job that verifies the fundamental invariant of double-entry bookkeeping:
+
+sql
+-- For every wallet, sum of ledger entries must equal current balance
+SELECT wallet_id,
+       SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE -amount END) AS computed_balance
+FROM ledger_entries
+GROUP BY wallet_id;
+-- Compare against wallets.balance — any mismatch pages the on-call team
+
+And system-wide: total money that entered via top-ups minus total withdrawn should equal the sum of all wallet balances plus everything in transit. This job is what catches the one-in-a-billion bug that slips past everything else — every real payments company runs something like this.
+
+Step 8 — Security essentials (worth a sentence each)
+Never store raw card/bank details — tokenize via the payment processor (Stripe/Razorpay), keep only a reference token. Keeps you out of most of PCI-DSS scope.
+Encryption at rest for wallet and ledger tables; TLS/mTLS for all internal money-movement calls.
+2FA/OTP on large transfers and new-device logins.
+Idempotency keys + rate limiting double as fraud controls, not just correctness controls.
+Step 9 — Trade-offs to state explicitly
+Decision	Choice	Trade-off accepted
+Consistency model	Strong consistency (CP)	Slight availability cost during partitions — non-negotiable for money
+Concurrency control	Row-level locking (SELECT FOR UPDATE)	Simpler correctness reasoning vs. optimistic locking's lower lock overhead
+Cross-shard transfers	Saga pattern (reserve → confirm)	Extra latency (~150–300ms) and complexity vs. a fictional single distributed ACID transaction
+Balance reads	Redis write-through	Extra write path complexity vs. sub-5ms reads with no staleness
+Money storage	Integer smallest-unit, not float	Slightly more code (conversion) vs. eliminating rounding-error bugs entirely
+Audit trail	Append-only double-entry ledger	More storage vs. mathematically checkable correctness and full history
+What the interviewer was really evaluating
+
+Unlike the URL shortener, scale wasn't the hard part here — correctness under concurrency was. The signals a strong candidate hits:
+
+Names CAP/CP explicitly and justifies it
+Catches the lost-update race condition unprompted and fixes it with locking
+Brings up idempotency without being asked — this is the single most common miss among mid-level candidates
+Recognizes that sharding breaks ACID across wallets and reaches for the Saga pattern by name
+Distinguishes what needs strong consistency (balance, transfers) from what can be eventually consistent (transaction history, notifications) — same read/write split thinking from Week 1's latency/throughput discussion
+Never stores money as a float
+

@@ -39,7 +39,7 @@ User user
 double amountOwed
 
 SplitStrategy: interface implemented by: equalSplit, exactSplit, percentSplit
-Split calculateSplit(Expense)
+List<Split> calculateSplit(Expense)
 
 Expense: class
 User paidBy, double amount, List<User> participant, List<Double> values, SplitType

@@ -4,4 +4,37 @@
  Fixed   Sliding  Token   Leaky   Sliding
  Window    Log    Bucket  Bucket   Counter
 
+ | Algorithm                  | Main idea                  | Burst support |  Accuracy |     Memory | Best use               |
+ | -------------------------- | -------------------------- | ------------: | --------: | ---------: | ---------------------- |
+ | **Fixed Window**           | Counter per fixed time     |          Poor |       Low |   Very low | Simple quotas          |
+ | **Sliding Window Log**     | Store request timestamps   |          Poor | Very high |       High | Exact limits           |
+ | **Sliding Window Counter** | Weighted counters          |      Moderate |      High |        Low | Large-scale APIs       |
+ | **Token Bucket**           | Tokens refill over time    |     Excellent |      High |   Very low | General API throttling |
+ | **Leaky Bucket**           | Queue drains at fixed rate |          Poor |      High | Low/medium | Traffic shaping        |
+
+
+Token Bucket - Tokens are added to a bucket at a fixed rate. Each request consumes one token; if empty, the request is dropped.
+Example: Bucket capacity of 100, refill rate of 10 tokens/sec.
+Pros: Allows short bursts of traffic, highly memory efficient.
+Cons: Challenging to tune both parameters (bucket capacity and refill rate) perfectly for all use cases.
+
+Leaky Bucket - Requests are added to a queue (the bucket) and processed at a strict, constant rate (the leak).
+Example: Queue size of 100, processes exactly 5 req/sec.
+Pros: Smooths out traffic bursts, ensures a highly stable outflow rate to protect downstream services.
+Cons: A sudden burst can fill the queue, causing new and potentially important requests to be dropped while older requests process.
+
+Fixed Window - Fixed number of requests allowed within strict, static time intervals (e.g., 12:00:00 to 12:01:00).
+Example: 5 req / minute.
+Pros: Very simple to implement, extremely low memory usage, very fast.
+Cons: The boundary problem (spikes at the edges of windows can allow 2x the intended limit within a short timeframe).
+
+Sliding Window Log - Keeps a log of individual request timestamps. Drops logs older than the current rolling time window.
+Example: Allow 5 req / rolling 60 seconds (timestamps typically stored in a Redis Sorted Set).
+Pros: Highly accurate rate limiting, completely solves the fixed window boundary problem.
+Cons: High memory footprint and slower processing, as it must store and manage a timestamp for every single request.
+
+Sliding Window Counter - A hybrid approach. Uses the previous window's request count to estimate the rate for the rolling current window.
+Example: (Current window count) + (Previous window count * % of overlap with the previous window).
+Pros: Highly memory efficient (only stores two counters per user), smooths out boundary spikes effectively.
+Cons: Slight mathematical inaccuracy, as it assumes requests in the previous window were perfectly evenly distributed.
 

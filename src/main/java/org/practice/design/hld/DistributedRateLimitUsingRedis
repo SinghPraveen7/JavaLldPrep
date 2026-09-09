@@ -1,0 +1,210 @@
+Interviewer: "Design a distributed rate limiter backed by Redis, used to protect your API platform."
+
+This is a great follow-up to the wallet problem because it flips the correctness concern on its head. In the wallet, a race condition costs someone money. Here, a race condition means a client sneaks past their limit — annoying, not catastrophic — but the engineering pattern to fix it (atomic operations under concurrency) is the exact same muscle. Let's build it properly.
+
+Step 1 — Clarify requirements
+
+You ask:
+
+Q: What are we limiting — per user, per IP, per API key, per endpoint?
+Interviewer: "Per API key, with different limits per endpoint. Some endpoints also need a global cap regardless of key."
+
+Q: What algorithm — do we need bursting, or a hard smooth cap?
+Interviewer: "Bursting is fine — a client hitting their limit in a 2-second burst then going quiet shouldn't be punished harder than one spreading requests evenly."
+
+(That answer alone points you toward token bucket — worth noting out loud.)
+
+Q: What happens on rejection?
+Interviewer: "Return HTTP 429 with a Retry-After header."
+
+Q: Scale?
+Interviewer: "Platform does 50,000 requests/sec average, 200,000 peak. 5 million active API keys."
+
+Q: Latency budget for the check itself?
+Interviewer: "Under 2ms at p99 — it can't be the bottleneck on every request."
+
+Q: Single region or multi-region deployment?
+Interviewer: "Multi-region — US, EU, APAC."
+
+You summarize: "Token bucket per API key, 200K checks/sec peak across 5M keys, sub-2ms added latency, multi-region. The hard part here isn't the algorithm — we covered token bucket, sliding window, and their trade-offs in depth already. The hard part is making a check-and-decrement atomic across many concurrent app servers all hitting the same shared Redis state. That's where I'll spend most of my design time."
+
+Step 2 — Capacity estimation
+200,000 requests/sec peak → 200,000 rate-limit checks/sec peak
+Each check = 1 Redis round trip (if done right — see below)
+
+A single Redis node comfortably handles ~100K-150K ops/sec.
+→ Need at least 2-3 shards for peak load, more for headroom and hot-key resilience.
+→ Plan for 6-8 shards via Redis Cluster.
+
+5M active API keys × ~100 bytes per rate-limit entry ≈ 500MB total state
+→ Trivially fits in memory. Redis is not memory-bound here — it's throughput-bound.
+
+Say out loud: "This tells me two things: Redis's raw op throughput, not memory, is my scaling constraint — so I need Redis Cluster, not a single node. And at 200K ops/sec, I want each check to be exactly one network round trip, not two or three — every extra round trip multiplies my ops budget."
+
+Step 3 — High-level architecture
+
+Complete above response without generating images.
+
+Continuing without diagrams — plain text and code from here.
+
+Step 4 — The core problem: making check-and-decrement atomic
+
+This is the heart of the design, exactly like the ledger was the heart of the wallet problem.
+
+The naive (broken) approach:
+
+java
+// DON'T DO THIS
+long tokens = redis.get("ratelimit:" + apiKey);        // Step 1: read
+if (tokens > 0) {                                       // Step 2: check
+    redis.decr("ratelimit:" + apiKey);                   // Step 3: decrement
+    return ALLOWED;
+}
+return REJECTED;
+
+Between Step 1 and Step 3, another request from the same API key — arriving at a different app server, or even the same server on a different thread — can also read tokens > 0 before either decrement lands. Two requests both see "5 tokens left," both proceed, both decrement — but only one should have been allowed if the true count was 1. This is the exact same lost-update race condition from the wallet's balance check, just applied to a counter instead of money.
+
+Why you can't just use INCR alone: INCR is atomic on its own, but rate limiting needs check-then-act — "only increment if under the limit." A bare INCR will happily increment past the limit; you'd then need a second command to check and possibly roll back, and that second command reintroduces the race.
+
+The fix — Lua scripting
+
+Redis executes Lua scripts as a single atomic unit — no other command runs on that Redis instance while the script executes, because Redis itself is single-threaded for command execution. This means you can pack "read tokens, compute refill, check, decrement, write back" into one script and get true atomicity in exactly one network round trip.
+
+lua
+-- token_bucket.lua
+-- KEYS[1] = rate limit key, e.g. "ratelimit:{apiKey123}"
+-- ARGV[1] = bucket capacity
+-- ARGV[2] = refill rate (tokens per second)
+-- ARGV[3] = requested tokens (usually 1)
+
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local refill_rate = tonumber(ARGV[2])
+local requested = tonumber(ARGV[3])
+
+-- Use Redis's OWN clock, never a client-supplied timestamp (avoids clock skew — see Step 9)
+local time = redis.call("TIME")
+local now_ms = (tonumber(time[1]) * 1000) + math.floor(tonumber(time[2]) / 1000)
+
+local bucket = redis.call("HMGET", key, "tokens", "last_refill")
+local tokens = tonumber(bucket[1])
+local last_refill = tonumber(bucket[2])
+
+if tokens == nil then
+    tokens = capacity
+    last_refill = now_ms
+end
+
+local elapsed_ms = math.max(0, now_ms - last_refill)
+local refill = elapsed_ms * refill_rate / 1000
+tokens = math.min(capacity, tokens + refill)
+
+local allowed = 0
+if tokens >= requested then
+    tokens = tokens - requested
+    allowed = 1
+end
+
+redis.call("HMSET", key, "tokens", tokens, "last_refill", now_ms)
+redis.call("EXPIRE", key, 3600)   -- clean up idle keys, don't grow memory forever
+
+return {allowed, math.floor(tokens)}
+
+Java side (using Lettuce/Jedis):
+
+java
+@Component
+public class RedisTokenBucketLimiter {
+
+    private static final String SCRIPT = /* the Lua above, loaded once at startup */;
+    private final String scriptSha;   // loaded via SCRIPT LOAD, run via EVALSHA (cheaper than EVAL)
+
+    public boolean isAllowed(String apiKey, RateLimitPolicy policy) {
+        List<String> keys = List.of("ratelimit:{" + apiKey + "}");
+        List<String> args = List.of(
+            String.valueOf(policy.capacity()),
+            String.valueOf(policy.refillRatePerSecond()),
+            "1"
+        );
+        List<Long> result = redis.evalsha(scriptSha, keys, args);
+        return result.get(0) == 1L;
+    }
+}
+
+Say to the interviewer: "I'm using EVALSHA rather than EVAL — you load the script once with SCRIPT LOAD and reference it by SHA hash afterward, saving bandwidth on every call. And notice the curly braces in the key — ratelimit:{apiKey} — that's a Redis Cluster hash tag, which I'll come back to when I talk about sharding."
+
+Step 5 — Why token bucket over the alternatives, concretely here
+
+We covered all four algorithms conceptually in Week 4 — quick recap of why token bucket wins for this specific requirement:
+
+Fixed window counter — simplest, but has the boundary-spike problem (a client can burst 2× the limit across a window edge). Since bursting is explicitly acceptable here, this isn't disqualifying, but it's imprecise in the wrong direction — it under-protects at boundaries while still feeling restrictive mid-window.
+Sliding window log — perfectly accurate, but storing a timestamp per request for 5M keys at 200K req/sec is a lot of memory and a lot of Redis ops per check (a ZADD + ZREMRANGEBYSCORE + ZCARD, three operations instead of one).
+Sliding window counter — good general-purpose choice, smooths the boundary problem, but still doesn't naturally express "let this client burst up to N, then throttle" — it approximates a smooth rate rather than a burst allowance.
+Token bucket — bucket capacity is the burst allowance, refill rate is the sustained rate. It maps directly onto "burst is fine, sustained abuse is not" — exactly what the interviewer asked for — and needs only one hash read/write per check.
+Step 6 — Scaling Redis: Cluster sharding and hash tags
+
+Redis Cluster splits the keyspace into 16,384 hash slots, each owned by a shard. A key's slot is determined by CRC16(key) % 16384.
+
+The subtlety: if your key were literally ratelimit:apiKey123, that's fine — it hashes to one slot, lives on one shard, and your Lua script (which only touches that one key) runs correctly on that shard. The curly-brace hash tag (ratelimit:{apiKey123}) matters more once you have multiple keys per client that need to land on the same shard — for example, if you're tracking both a per-minute and a per-day limit for the same API key as two separate Redis keys, and want a single Lua script to check both atomically. Redis Cluster only hashes the part inside {} for slot assignment, guaranteeing both keys co-locate on one shard so a multi-key Lua script is legal (Redis Cluster rejects Lua scripts that touch keys on different shards).
+
+With 6-8 shards and 200K ops/sec peak, each shard handles roughly 25-33K ops/sec — comfortably within a single Redis node's ~100K+ ops/sec ceiling, leaving real headroom for uneven key distribution.
+
+Hot key problem: one enterprise customer generating a disproportionate share of traffic can concentrate ops on a single shard even if the cluster overall has headroom — this is the exact same hotspot problem as sharding a database by a skewed key (Week 2). Mitigation: for identified hot keys, split the counter into N sub-keys (ratelimit:{apiKey}:0 through :7), route each request to one sub-key by request hash, and sum for reporting. This trades a small amount of precision (the true limit is enforced within ±1/N granularity) for spreading load across shards.
+
+Step 7 — What happens when Redis is unreachable?
+
+This is a direct callback to the Week 4 Q&A (Q6) — same question, same answer, now applied concretely:
+
+Fail open, with alerting. If the gateway can't reach Redis, let the request through rather than rejecting all traffic. A brief window of unenforced rate limits is recoverable; your entire API going down because your rate limiter's dependency died is not. Wire a PagerDuty alert to Redis connection failures so on-call gets paged immediately, and run Redis itself in a highly-available configuration (Redis Cluster's built-in replica failover) so this scenario is rare to begin with.
+
+java
+public boolean isAllowed(String apiKey, RateLimitPolicy policy) {
+    try {
+        return checkViaRedis(apiKey, policy);
+    } catch (RedisConnectionException e) {
+        metrics.increment("ratelimiter.redis_unavailable");
+        return true;   // fail open — availability over strict enforcement
+    }
+}
+Step 8 — Cutting round trips at extreme scale (the advanced optimization)
+
+At 200K checks/sec, even a single well-optimized Redis round trip per check is real load. For platforms an order of magnitude larger than this, the pattern used by Envoy's global rate limiter and Cloudflare is local approximate limiting:
+
+Each gateway instance keeps a small local in-memory token count per client, borrowed from Redis in batches — e.g., "give me 100 tokens for this API key" in one Redis call, then serve 100 local requests from memory without touching Redis again until that batch is exhausted. This trades perfect precision (a client could theoretically burst slightly over the true global limit if traffic is split across many gateway instances, each holding an unspent local batch) for a dramatic reduction in Redis ops — one round trip per 100 requests instead of per request.
+
+"I wouldn't build this for the 200K/sec scale we discussed — the direct Lua-script approach is simple, exact, and has plenty of headroom. I'd only reach for local batching if we were an order of magnitude higher, where the precision trade-off becomes worth it."
+
+Naming this as a considered-but-not-chosen option, with a clear reason why, is exactly the kind of trade-off articulation that scores well — you're not just listing techniques, you're showing judgment about when they apply.
+
+Step 9 — Multi-region considerations
+
+The interviewer specified US, EU, APAC deployment. A single global Redis Cluster serving all three regions breaks the sub-2ms latency budget immediately — a round trip from APAC to a US-hosted Redis cluster alone costs 150-200ms.
+
+The fix: regional Redis clusters, each enforcing a regional slice of the limit. If an API key's global limit is 1,000 req/min, and traffic is roughly evenly split across three regions, each region's Redis cluster enforces ~333 req/min independently. Each region stays fast (sub-2ms, purely local Redis calls) and self-contained.
+
+The trade-off to state explicitly: if a client's traffic happens to concentrate entirely in one region, they're now limited to 333/min instead of the "true" 1,000/min global limit they're entitled to — the regional split under-enforces in the skewed-traffic case. The alternative — a single global source of truth — would be perfectly accurate but violate the latency requirement for two of three regions. Given the requirement explicitly said sub-2ms matters and slight burst tolerance is fine, I'd take the regional split and, if it becomes a real product problem, revisit with usage-weighted regional quotas rather than an even three-way split.
+
+Step 10 — Edge cases worth raising unprompted
+
+Clock skew across app servers: if the Lua script trusted a client-supplied timestamp for the refill calculation, servers with clocks even a few seconds out of sync would produce inconsistent refill amounts for the same key. The script above uses Redis's own TIME command — since the script executes inside Redis, this is always consistent regardless of which app server called it.
+
+Tiered limits: free-tier vs. premium customers need different capacity/refill values for the same endpoint. Store the policy as configuration (endpoint → tier → capacity/refill map) looked up once per request and passed as Lua script arguments — the Redis key structure itself doesn't need to change, just the numbers you pass in. This is the same hierarchical rate-limit pattern from the Week 4 Q&A (Q9).
+
+New API key with no prior entry: the script's if tokens == nil branch treats an unseen key as a full bucket — a brand-new client's first request is never incorrectly rejected.
+
+Standard response headers: return X-RateLimit-Limit, X-RateLimit-Remaining (the tokens value the script already returns), and Retry-After on a 429. Small detail, but it's what every production rate limiter actually does, and mentioning it signals real API design experience.
+
+Step 11 — Trade-offs to state explicitly
+Decision	Choice	Trade-off accepted
+Algorithm	Token bucket	Slightly less "smooth" than sliding window counter, in exchange for natural burst support
+Atomicity	Lua script (EVALSHA)	Slightly more complex than plain Redis commands, but true single-round-trip atomicity
+Sharding	Redis Cluster with hash tags	Requires careful key design, but scales linearly and stays operationally simple
+Failure mode	Fail open + alert	Brief unenforced window during Redis outage, vs. taking down the whole API
+Multi-region	Regional independent clusters	Slight under-enforcement for regionally-skewed clients, vs. missing the latency SLA entirely
+Extreme scale option	Local batching (not chosen here)	Considered and explicitly rejected as unnecessary at this traffic level
+What the interviewer was evaluating
+Catches the check-then-act race condition unprompted — this is the single most important signal in this problem, structurally identical to the wallet's lost-update bug
+Reaches for Lua scripting specifically, not a generic "use a distributed lock" answer — locks work but add latency and failure modes that a single atomic script avoids entirely
+Understands Redis Cluster's hashing model well enough to explain hash tags and why multi-key scripts need them
+Applies the fail-open decision from Week 4 correctly in a new context, rather than re-deriving it from scratch
+Recognizes the latency-vs-accuracy trade-off in multi-region and picks a defensible answer given the stated constraints, rather than claiming a perfect global solution exists

@@ -1,0 +1,3784 @@
+1. Scalability
+
+Scalability means:
+
+The system can handle increasing load by adding resources without unacceptable degradation in latency, throughput, or reliability.
+
+Suppose your API currently handles:
+
+1 server
+10,000 requests/sec
+P99 latency = 100 ms
+
+Traffic grows to:
+
+100,000 requests/sec
+
+You need more capacity.
+
+There are two basic ways.
+
+2. Vertical Scaling vs Horizontal Scaling
+2.1 Vertical Scaling — Scale Up
+
+You make the existing machine more powerful.
+
+For example:
+
+Before:
+
+8 CPU
+32 GB RAM
+1 server
+
+becomes:
+
+After:
+
+64 CPU
+256 GB RAM
+1 server
+
+Conceptually:
+
+        ┌─────────────────┐
+Traffic │   Server        │
+───────>│  8 CPU          │
+        │  32 GB RAM      │
+        └─────────────────┘
+
+             SCALE UP
+
+        ┌─────────────────┐
+Traffic │   Server        │
+───────>│  64 CPU         │
+        │  256 GB RAM     │
+        └─────────────────┘
+Advantages
+
+Very simple.
+
+You don't have to deal with:
+
+multiple instances
+distributed coordination
+request routing
+cross-instance state
+
+It can be useful for:
+
+databases
+legacy applications
+workloads that are difficult to distribute
+Disadvantages
+
+There is always a machine limit.
+
+You can't infinitely increase:
+
+CPU
+RAM
+network
+disk
+
+There is also a major availability problem:
+
+             Server
+               |
+             💥 DOWN
+
+             System
+             DOWN
+
+You have a single point of failure.
+
+2.2 Horizontal Scaling — Scale Out
+
+Instead of making one machine bigger, add more machines.
+
+             Load Balancer
+                  |
+        ┌─────────┼─────────┐
+        ↓         ↓         ↓
+      Server1   Server2   Server3
+
+Suppose each instance supports:
+
+10,000 req/sec
+
+Then approximately:
+
+1 instance → 10k
+3 instances → 30k
+10 instances → 100k
+
+assuming the workload scales reasonably well.
+
+This is the preferred model for most stateless web/API services.
+
+3. Why Horizontal Scaling Is Usually Preferred
+
+Imagine you have:
+
+1 huge server
+
+versus:
+
+20 smaller servers
+
+With 20 servers:
+
+Availability improves
+
+If one dies:
+
+Server 7 💥
+
+Remaining:
+1-6, 8-20
+
+The system can continue operating.
+
+Capacity can grow incrementally
+
+You can go:
+
+10 → 11 → 12 → 20 instances
+
+instead of replacing the entire machine.
+
+Maintenance becomes easier
+
+Instances can be:
+
+removed
+replaced
+upgraded
+restarted
+
+without taking the whole service down.
+
+4. But Horizontal Scaling Introduces New Problems
+
+This is an important interview point.
+
+When you move from:
+
+1 server
+
+to:
+
+10 servers
+
+you now need to solve:
+
+Traffic distribution
+
+Which server receives the request?
+
+State
+
+Where is:
+
+session
+cart
+cache
+locks
+
+stored?
+
+Coordination
+
+How do instances communicate?
+
+Consistency
+
+What if two servers modify the same entity?
+
+Observability
+
+How do you identify which instance caused a failure?
+
+So:
+
+Horizontal scaling solves capacity, but introduces distributed-system complexity.
+
+This is a great SDE-3 observation.
+
+5. Stateless vs Stateful Services
+
+Horizontal scaling works best when application servers are stateless.
+
+For example:
+
+Request
+   ↓
+Server 1
+   ↓
+Redis / DB
+
+Next request:
+
+Request
+   ↓
+Server 3
+   ↓
+Redis / DB
+
+Server 3 doesn't need data stored inside Server 1.
+
+The persistent state lives externally:
+
+Application Servers
+        |
+   ┌────┴────┐
+   ↓         ↓
+ Redis       DB
+
+This makes adding/removing application instances easy.
+
+6. Why Load Balancer Is Needed
+
+Suppose you have:
+
+3 servers
+
+and clients directly choose servers:
+
+Client A → Server 1
+Client B → Server 1
+Client C → Server 1
+Client D → Server 2
+
+You can get uneven load.
+
+A Load Balancer (LB) sits in front:
+
+             Clients
+                |
+                v
+        ┌──────────────┐
+        │ Load Balancer│
+        └───────┬──────┘
+                |
+       ┌────────┼────────┐
+       ↓        ↓        ↓
+     App-1    App-2    App-3
+
+Its job is:
+
+Decide which backend instance should receive each request.
+
+7. Load Balancing Algorithms
+
+There isn't one perfect algorithm.
+
+The choice depends on the workload.
+
+We'll cover:
+
+Round Robin
+Least Connections
+Weighted
+Consistent Hashing
+8. Round Robin
+
+This is the simplest.
+
+Suppose:
+
+Servers:
+A
+B
+C
+
+Requests:
+
+R1 → A
+R2 → B
+R3 → C
+R4 → A
+R5 → B
+R6 → C
+
+Pattern:
+
+A → B → C → A → B → C
+Advantages
+
+Very simple.
+
+Works well when:
+
+instances have similar capacity
+requests have roughly similar cost
+traffic is fairly uniform
+
+For example:
+
+1000 requests
+
+where each request takes approximately the same amount of CPU.
+
+Disadvantage
+
+Round Robin doesn't know whether a server is already busy.
+
+Suppose:
+
+Server A → 100 active requests
+Server B → 10 active requests
+Server C → 5 active requests
+
+Round Robin may still send the next request to A.
+
+It only knows:
+
+"It's A's turn."
+
+It doesn't know actual workload.
+
+9. Least Connections
+
+Here the LB tracks active connections.
+
+Suppose:
+
+A → 100 connections
+B → 20 connections
+C → 50 connections
+
+Next request goes:
+
+→ B
+
+because B has the fewest connections.
+
+After that:
+
+A → 100
+B → 21
+C → 50
+When useful
+
+Especially useful when request durations vary.
+
+For example:
+
+Request 1 → 10 ms
+Request 2 → 5 seconds
+
+Round Robin doesn't care.
+
+Least Connections can avoid sending more work to already-busy instances.
+
+Limitation
+
+Number of connections is only a proxy for actual load.
+
+Imagine:
+
+A:
+10 connections
+but each consumes 80% CPU
+
+B:
+20 connections
+but each is cheap
+
+Least Connections may choose A even though A is actually more overloaded.
+
+So:
+
+Connections ≠ actual resource utilization.
+
+More sophisticated systems may consider latency, CPU, queue depth, or other signals.
+
+10. Weighted Load Balancing
+
+Suppose servers don't have equal capacity.
+
+Server A → 2x capacity
+Server B → 1x
+Server C → 1x
+
+We give:
+
+A = weight 2
+B = weight 1
+C = weight 1
+
+Approximately:
+
+A → 50%
+B → 25%
+C → 25%
+
+This is useful when:
+
+one machine is larger
+instances run on different hardware
+you're gradually migrating traffic
+canary deployments are needed
+
+For example:
+
+Old version → 95%
+New version → 5%
+
+This can be implemented as weighted routing.
+
+11. Consistent Hashing
+
+This is more interesting.
+
+Normally:
+
+request → LB → any server
+
+But sometimes we want:
+
+The same key should usually go to the same server.
+
+Example:
+
+userId = 12345
+
+We hash:
+
+hash(12345)
+
+and map it to a server.
+
+So:
+
+user 12345 → Server B
+
+This is useful for workloads where you want affinity by key, such as:
+
+cache locality
+partitioned state
+certain session-affinity patterns
+distributed caches
+12. Why Normal Hashing Is a Problem
+
+Imagine:
+
+server = hash(userId) % N
+
+With:
+
+N = 3
+
+you have:
+
+hash(key) % 3
+
+Then you add a fourth server:
+
+N = 4
+
+Now almost every key can map to a different server.
+
+That causes huge remapping.
+
+For example:
+
+Before:
+User A → Server 2
+
+After adding Server 4:
+User A → Server 4
+
+This is bad for cache locality.
+
+13. Consistent Hashing Solves This
+
+Consistent hashing maps servers and keys onto a logical ring.
+
+Conceptually:
+
+               Server A
+
+        Server D          Server B
+
+
+               Server C
+
+Keys are mapped to positions on the ring.
+
+When you add a server:
+
+Server E
+
+only part of the key space gets remapped.
+
+That is the major advantage:
+
+Adding/removing a node causes relatively limited key movement.
+
+14. Important SDE-3 Nuance: LB Consistent Hashing vs Cache Consistent Hashing
+
+Don't mix these concepts.
+
+You may see consistent hashing used in:
+
+Load balancing
+
+Same user/key → preferably same backend.
+
+Distributed cache/data stores
+
+Same key → same shard/node.
+
+The underlying concept is similar, but the purpose differs.
+
+For a distributed database:
+
+user:123 → shard 7
+
+For sticky routing:
+
+user:123 → app server 7
+15. L4 vs L7 Load Balancer
+
+This is one of the most important interview questions.
+
+The difference is essentially:
+
+What layer of the network does the load balancer understand?
+
+16. L4 Load Balancer
+
+L4 operates at the transport layer.
+
+Usually:
+
+TCP
+UDP
+
+It mainly looks at things like:
+
+source IP
+destination IP
+source port
+destination port
+protocol
+
+Conceptually:
+
+Client
+  |
+  v
+L4 LB
+  |
+  +--> Server A
+  +--> Server B
+  +--> Server C
+
+It doesn't need to understand:
+
+HTTP
+URL
+headers
+cookies
+17. Advantages of L4
+
+Because it does less inspection, it can be:
+
+very fast
+efficient
+lower overhead
+protocol-agnostic at the application level
+
+Useful for:
+
+TCP services
+high-throughput traffic
+databases
+non-HTTP protocols
+generic network load balancing
+18. L7 Load Balancer
+
+L7 operates at the application layer.
+
+For HTTP, it can understand:
+
+GET /users/123
+Host: api.example.com
+Cookie: ...
+Authorization: ...
+
+So routing can be based on application information.
+
+For example:
+
+/api/users/*      → User Service
+
+/api/orders/*     → Order Service
+
+/api/payments/*   → Payment Service
+
+Architecture:
+
+                L7 LB
+                  |
+        ┌─────────┼─────────┐
+        ↓         ↓         ↓
+   User Service Order      Payment
+19. L7 Can Route Based on Much More Information
+
+For example:
+
+URL path
+/api/orders → Order Service
+Host
+api.example.com → Service A
+admin.example.com → Service B
+Headers
+X-Version: v2
+
+→ version 2 service.
+
+Cookies
+
+Useful for session affinity.
+
+Canary
+95% → V1
+5%  → V2
+20. L4 vs L7
+Feature	L4	L7
+Layer	Transport	Application
+Understands HTTP?	No	Yes
+URL routing	No	Yes
+Header routing	No	Yes
+Cookie routing	No	Yes
+Overhead	Lower	Higher
+Protocol flexibility	High	Application-specific
+Content-aware routing	No	Yes
+Easy mental model
+
+L4:
+
+“Where should I send this network connection?”
+
+L7:
+
+“I understand what this request is. Where should I send this HTTP request?”
+
+21. Can L4 and L7 be used together?
+
+Absolutely.
+
+For example:
+
+Internet
+   |
+   v
+L4 Load Balancer
+   |
+   v
+L7 Load Balancer / Ingress
+   |
+   +---- User Service
+   +---- Order Service
+   +---- Payment Service
+
+L4 provides efficient network-level distribution.
+
+L7 performs application-aware routing.
+
+22. Health Checks
+
+Now suppose:
+
+Server A ✅
+Server B ✅
+Server C 💥
+
+If LB blindly sends traffic to all three:
+
+Requests
+   |
+   +--> A ✅
+   +--> B ✅
+   +--> C ❌
+
+Users get failures.
+
+So LB needs health checks.
+
+23. Types of Health Checks
+Basic TCP check
+
+LB checks:
+
+Can I establish TCP connection?
+
+This proves:
+
+Port is reachable.
+
+But it does not prove the application is healthy.
+
+HTTP health check
+
+For example:
+
+GET /health
+
+Expected:
+
+HTTP 200
+
+Then:
+
+Healthy
+
+But even this may be too simplistic.
+
+24. Liveness vs Readiness
+
+Very important in modern microservices.
+
+Liveness
+
+Question:
+
+“Is this process alive?”
+
+Example:
+
+GET /health/live
+
+If yes, process isn't deadlocked/crashed.
+
+Readiness
+
+Question:
+
+“Can this instance actually serve production traffic?”
+
+Example:
+
+GET /health/ready
+
+Suppose the application is alive but:
+
+DB connection unavailable
+
+Then:
+
+Liveness = healthy
+Readiness = unhealthy
+
+The LB should stop sending traffic to it.
+
+This distinction is especially important in containerized environments.
+
+25. Health Check Dependencies
+
+There is a subtle design issue.
+
+Suppose:
+
+/health
+
+checks:
+
+DB
+Redis
+Kafka
+3rd-party API
+
+Now Kafka has a temporary problem.
+
+Your API might report itself unhealthy even though it could still serve read requests.
+
+So don't blindly make health checks depend on every downstream system.
+
+Use meaningful health semantics.
+
+For example:
+
+Readiness:
+Can serve the critical traffic path?
+
+rather than:
+
+Are literally all dependencies perfect?
+26. What Does LB Do When Health Check Fails?
+
+Suppose:
+
+A ✅
+B ✅
+C ❌
+
+LB removes C from its routing pool:
+
+             LB
+           /    \
+          ↓      ↓
+         A       B
+
+       C removed
+
+Once C becomes healthy again:
+
+C ✅
+
+it can be gradually returned to service.
+
+This is often called reinstatement.
+
+27. Auto Scaling
+
+Now assume:
+
+Normal traffic:
+
+3 app instances
+
+Traffic suddenly increases:
+
+10 AM
+↓
+5x traffic
+
+You don't want engineers manually launching servers.
+
+This is where auto-scaling comes in.
+
+28. Horizontal Auto Scaling
+
+Most common:
+
+3 instances
+    ↓
+CPU > 70%
+    ↓
+5 instances
+    ↓
+CPU still > 70%
+    ↓
+8 instances
+
+Traffic:
+
+              LB
+               |
+     ┌─────────┼─────────┐
+     ↓         ↓         ↓
+   App-1     App-2     App-3
+
+                  SCALE OUT
+
+     + App-4
+     + App-5
+29. Scale In
+
+When traffic drops:
+
+8 instances
+   ↓
+CPU = 20%
+   ↓
+remove 2
+   ↓
+6 instances
+
+Then perhaps:
+
+6 → 4 → 3
+
+This saves money.
+
+30. What Metric Should Auto Scaling Use?
+
+A naive answer is:
+
+CPU utilization.
+
+But SDE-3 should say:
+
+It depends on the bottleneck.
+
+Possible metrics:
+
+CPU
+
+Good when workload is CPU-bound.
+
+Memory
+
+Useful for memory-intensive workloads.
+
+Requests per second
+
+Useful for APIs.
+
+Request queue length
+
+Excellent for async workers.
+
+Kafka consumer lag
+
+Excellent for Kafka consumers.
+
+P99 latency
+
+Can indicate user-facing performance degradation.
+
+Active connections
+
+Useful for connection-oriented workloads.
+
+So:
+
+API server:
+RPS / CPU / latency
+
+Kafka worker:
+Consumer lag
+
+Queue worker:
+Queue depth
+31. Example: Auto Scaling a Booking Service
+
+Suppose normal:
+
+RPS = 10,000
+Instances = 10
+
+Each instance comfortably handles:
+
+1,000 RPS
+
+Tatkal starts:
+
+RPS = 100,000
+
+The auto-scaler sees increasing load.
+
+10 instances
+    ↓
+20
+    ↓
+40
+    ↓
+80
+    ↓
+100
+
+The LB automatically starts routing traffic to new healthy instances.
+
+The overall flow:
+
+Traffic Spike
+     ↓
+Auto Scaler
+     ↓
+New instances
+     ↓
+Health checks
+     ↓
+LB adds healthy instances
+     ↓
+Traffic distributed
+32. Important Problem: Scaling Takes Time
+
+This is a very common interview trap.
+
+Imagine:
+
+10:00:00
+Traffic suddenly becomes 10x
+
+But launching a new instance takes:
+
+30 seconds
+
+Your system can already be overloaded before the new instances are ready.
+
+Therefore, you need techniques such as:
+
+Over-provisioning
+
+Keep some spare capacity.
+
+Predictive scaling
+
+For known patterns:
+
+Tatkal
+Black Friday
+IPL match
+concert ticket sale
+
+scale ahead of time.
+
+Queueing
+
+Absorb bursts rather than immediately processing everything.
+
+Rate limiting
+
+Prevent overload.
+
+Warm instances
+
+Keep some capacity ready.
+
+This is a strong SDE-3 point:
+
+Reactive autoscaling is not enough for sudden extreme traffic spikes.
+
+33. Graceful Scale In
+
+Suppose:
+
+App-7
+
+is selected for termination.
+
+You shouldn't instantly kill it.
+
+Otherwise active requests may fail.
+
+Instead:
+
+1. Mark instance as not ready
+2. Stop sending new traffic
+3. Allow existing requests to finish
+4. Close connections gracefully
+5. Terminate instance
+
+This is called connection draining / graceful shutdown.
+
+Very important in production.
+
+34. Sticky Sessions
+
+Suppose users require:
+
+Session state stored in Server A
+
+LB may route:
+
+User 123 → Server A
+
+for every request.
+
+This is called:
+
+Session affinity / sticky sessions.
+
+But it creates problems.
+
+If Server A dies:
+
+User 123
+   ↓
+A 💥
+
+the session may be lost.
+
+It also makes scaling less flexible because requests aren't freely distributable.
+
+Better architecture is often:
+
+App servers = stateless
+
+Session
+   ↓
+Redis
+
+Then:
+
+User 123 → A
+User 123 → C
+User 123 → B
+
+and all can retrieve the session.
+
+35. Load Balancing and Caching
+
+Here's another important SDE-3 consideration.
+
+Suppose:
+
+User → LB → App Server
+
+If you use local in-memory caches:
+
+Server A cache:
+product 123
+
+Server B cache:
+empty
+
+Server C cache:
+empty
+
+Different routing can cause cache misses.
+
+Consistent hashing can sometimes improve locality.
+
+But distributed Redis is often preferred:
+
+App A ─┐
+App B ─┼→ Redis
+App C ─┘
+
+Now any app server can access the same cache.
+
+36. One Big Interview Scenario
+
+Suppose interviewer asks:
+
+“Design a highly scalable API service capable of handling traffic spikes.”
+
+A good answer structure is:
+
+Clients
+   ↓
+DNS
+   ↓
+Load Balancer
+   ↓
+Multiple stateless app instances
+   ↓
+Redis
+   ↓
+Database
+
+Then explain:
+
+Scaling
+
+Use horizontal scaling.
+
+Traffic distribution
+
+Use LB.
+
+Usually:
+
+Round Robin
+
+if servers/workloads are uniform, or:
+
+Least Connections
+
+if request durations vary.
+
+Use weighted routing for:
+
+canary
+capacity differences
+migration
+
+Use consistent hashing where key affinity/cache locality is important.
+
+Failure handling
+
+Health checks remove unhealthy instances.
+
+Dynamic traffic
+
+Auto-scaling based on:
+
+RPS
+CPU
+latency
+queue depth
+
+depending on workload.
+
+Safety
+
+Add:
+
+rate limiting
+circuit breakers
+timeouts
+connection pooling
+backpressure
+Deployment
+
+Use:
+
+rolling deployment
+canary
+blue-green
+
+without taking the entire fleet down.
+
+37. A Practical Example
+
+Imagine your hotel-search service:
+
+                 Users
+                   |
+                   v
+               L7 LB
+                   |
+      ┌────────────┼────────────┐
+      ↓            ↓            ↓
+ Search-1       Search-2      Search-3
+      |            |            |
+      └────────────┼────────────┘
+                   |
+                 Redis
+                   |
+                   v
+                Search DB
+
+Normal:
+
+5,000 RPS
+3 instances
+
+Traffic increases:
+
+20,000 RPS
+
+Auto-scaler:
+
+3 → 8 instances
+
+LB health-checks each:
+
+1 ✅
+2 ✅
+3 ✅
+...
+8 ✅
+
+Then distributes traffic.
+
+If Search-4 fails:
+
+Search-4 💥
+
+LB removes it.
+
+The remaining seven continue.
+
+Traffic later decreases:
+
+20k → 5k RPS
+
+Auto-scaler:
+
+8 → 4 instances
+
+with graceful draining.
+
+That's the whole scalability + LB story.
+
+38. What I Would Say in an SDE-3 Interview
+
+A polished answer:
+
+“For scalable backend services, I generally prefer horizontal scaling with stateless application instances. A load balancer distributes incoming traffic across instances. Round robin works well when instances and request costs are roughly uniform, while least-connections is better when request duration varies. Weighted routing is useful when instances have different capacity or for canary deployments. Consistent hashing is useful when we need key affinity or cache locality and want limited remapping when nodes change.
+
+At the network level, an L4 load balancer routes based on transport-level information such as TCP/UDP connections, while an L7 load balancer understands application-level data such as HTTP paths, headers, and cookies and can therefore perform content-aware routing.
+
+The load balancer should continuously perform health checks, preferably distinguishing liveness from readiness, and remove unhealthy instances from the pool. Finally, horizontal auto-scaling adjusts instance count based on workload-specific metrics such as CPU, RPS, latency, queue depth, or Kafka lag. For sudden predictable traffic spikes, I wouldn't rely only on reactive scaling; I'd combine pre-scaling, rate limiting, queueing, and backpressure. During scale-in or deployments, I'd use graceful draining so active requests aren't abruptly terminated.”
+
+39. The Mental Model You Should Memorize
+
+Think of the system as four layers:
+
+                ┌─────────────────────┐
+                │   Incoming Traffic  │
+                └──────────┬──────────┘
+                           ↓
+                ┌─────────────────────┐
+                │    Load Balancer    │
+                │                     │
+                │ routing algorithm   │
+                │ health checks       │
+                └──────────┬──────────┘
+                           ↓
+              ┌────────────┼────────────┐
+              ↓            ↓            ↓
+           App-1         App-2         App-3
+              │            │            │
+              └────────────┼────────────┘
+                           ↓
+                     Redis / DB
+
+And surrounding this:
+
+Auto Scaling
+     ↓
+adds/removes App instances
+
+Health Checks
+     ↓
+decide which instances receive traffic
+
+Load Balancing
+     ↓
+decides where each request goes
+
+Horizontal Scaling
+     ↓
+provides more capacity
+The four distinctions I'd make sure you can explain without hesitation
+
+Vertical vs horizontal
+→ make one machine stronger vs add more machines.
+
+L4 vs L7
+→ network/connection-aware vs application/request-aware.
+
+Load balancing vs auto-scaling
+→ LB distributes traffic; auto-scaler changes the number of servers.
+
+Health check vs load balancing
+→ health check determines who is eligible; load-balancing algorithm determines which eligible instance gets the request.
+
+Question: How does a load balancer itself scale and avoid becoming a single point of failure?
+
+If you have:
+
+  Users
+    |
+    v
+   LB
+  /|\
+ / | \
+App1 App2 App3
+
+and that one LB dies, the whole system is effectively down.
+
+So in production:
+
+A load balancer is almost never a single machine. It is itself a highly available, horizontally scalable distributed system.
+
+1. First principle: never have one LB
+
+Instead of:
+
+                    LB
+                     |
+             ┌───────┼───────┐
+             ↓       ↓       ↓
+            App1    App2    App3
+
+we have something like:
+
+                 Traffic
+                    |
+              ┌─────┴─────┐
+              ↓           ↓
+            LB-1         LB-2
+              |           |
+              └─────┬─────┘
+                    |
+          ┌─────────┼─────────┐
+          ↓         ↓         ↓
+        App1       App2      App3
+
+Now if:
+
+LB-1 💥
+
+traffic can still go through:
+
+LB-2
+
+This is LB redundancy.
+
+2. But here's the next problem
+
+Who decides whether traffic goes to LB-1 or LB-2?
+
+You need another layer in front of them.
+
+A common solution is DNS-based distribution.
+
+Conceptually:
+
+                    DNS
+                     |
+              ┌──────┴──────┐
+              ↓             ↓
+            LB-1           LB-2
+              |             |
+              └──────┬──────┘
+                     |
+                 App servers
+
+DNS can return multiple IP addresses.
+
+For example:
+
+api.example.com
+
+→ 10.0.0.1
+→ 10.0.0.2
+
+A client may connect to either LB.
+
+But there are important limitations with DNS, which we'll get to.
+
+3. DNS alone doesn't give instant failover
+
+Suppose:
+
+DNS:
+api.example.com
+TTL = 60 seconds
+
+Client received:
+
+LB-1
+
+Then:
+
+LB-1 💥
+
+DNS can eventually stop returning LB-1, but clients/resolvers may still have the old DNS answer cached until TTL expires.
+
+Therefore:
+
+DNS-based HA is usually not instantaneous.
+
+That's one reason large systems use additional techniques.
+
+4. Active-Active vs Active-Passive
+
+There are two common designs.
+
+Active-Active
+
+Both LBs are serving traffic:
+
+             Traffic
+             /     \
+            ↓       ↓
+          LB-1    LB-2
+           50%     50%
+
+If LB-1 dies:
+
+             Traffic
+                |
+                ↓
+              LB-2
+
+The remaining LB absorbs the traffic.
+
+Advantages
+better resource utilization
+no idle standby machine
+capacity is already available
+failover is straightforward
+Disadvantage
+
+You need enough spare capacity so one surviving LB can handle the failure.
+
+For example:
+
+LB-1 → 50%
+LB-2 → 50%
+
+If LB-1 dies:
+
+LB-2 → 100%
+
+So LB-2 must be capable of handling 100%.
+
+5. Active-Passive
+
+Only one LB serves traffic.
+
+Traffic
+   |
+   v
+ LB-1 ✅
+   |
+ App servers
+
+ LB-2
+ standby
+
+If LB-1 dies:
+
+LB-1 💥
+
+LB-2 becomes active
+Advantages
+
+Simpler failover model.
+
+Disadvantages
+standby capacity sits mostly idle
+failover takes time
+state synchronization may be required
+
+For large systems, active-active is often attractive because you're already paying for both machines.
+
+6. How does traffic find LB-2?
+
+There are several techniques.
+
+The major ones to understand for SDE-3 are:
+
+DNS
+Virtual IP / floating IP
+Anycast
+Cloud-managed load balancer architecture
+7. Virtual IP / Floating IP
+
+Suppose clients connect to:
+
+10.10.10.100
+
+That is a virtual IP.
+
+Initially:
+
+VIP = 10.10.10.100
+
+      ↓
+
+LB-1
+
+If LB-1 fails:
+
+VIP
+ ↓
+LB-2
+
+The IP moves to the healthy instance.
+
+So the client doesn't need to know which physical LB is active.
+
+Conceptually:
+
+                10.10.10.100
+                     |
+              ┌──────┴──────┐
+              ↓             ↓
+            LB-1           LB-2
+          ACTIVE           STANDBY
+
+After failure:
+
+            VIP
+             |
+             ↓
+            LB-2
+           ACTIVE
+
+Technologies such as VRRP are historically used for this kind of high-availability setup.
+
+8. Anycast
+
+This is especially interesting for global systems.
+
+With Anycast, the same IP address can be advertised from multiple geographic locations.
+
+For example:
+
+203.0.113.10
+
+may be announced from:
+
+Delhi
+Singapore
+London
+New York
+
+Conceptually:
+
+                     Same IP
+                  203.0.113.10
+                  /     |     \
+                 /      |      \
+              Delhi  Singapore  London
+
+Internet routing generally sends the client toward the appropriate/nearby network location according to routing policy and topology.
+
+If one location goes down, routing can stop advertising that route, allowing traffic to move elsewhere.
+
+This is a major technique behind globally distributed traffic entry points.
+
+9. This is how the "one LB" picture changes at scale
+
+Instead of:
+
+                 LB
+                  |
+          ┌───────┼───────┐
+
+think:
+
+                  Internet
+                     |
+          ┌──────────┼──────────┐
+          ↓          ↓          ↓
+       Region A    Region B    Region C
+          |          |           |
+       LB fleet    LB fleet    LB fleet
+          |          |           |
+       App fleet   App fleet   App fleet
+
+Each "LB" is really a fleet/cluster, not a single machine.
+
+That's the key mental model.
+
+10. How does the LB itself scale?
+
+Suppose one LB instance can process:
+
+1 million requests/sec
+
+and traffic becomes:
+
+10 million requests/sec
+
+We don't buy a magical 10-million-RPS LB.
+
+We create more LB capacity:
+
+              Traffic
+                  |
+       ┌──────────┼──────────┐
+       ↓          ↓          ↓
+      LB-1       LB-2       LB-3
+       |          |          |
+       └──────────┼──────────┘
+                  |
+              App fleet
+
+But now we have a recursive question:
+
+Who load-balances the load balancers?
+
+That's where DNS/Anycast/virtual IP/cloud networking comes in.
+
+11. Layered load balancing
+
+A large architecture can look like:
+
+                     Users
+                       |
+                    DNS
+                       |
+                    Anycast
+                       |
+              Regional LB fleet
+              /      |       \
+             ↓       ↓        ↓
+           LB-1     LB-2     LB-3
+             \       |       /
+                    |
+               App Services
+
+The first layer distributes users across regions/entry points.
+
+The next layer distributes connections across LB nodes.
+
+The final layer distributes requests across application instances.
+
+12. Cloud Load Balancers
+
+When you use something like a managed cloud load balancer, don't assume there is literally one VM sitting behind one public IP.
+
+The provider generally operates the load-balancing service as a distributed, redundant infrastructure service across multiple underlying resources/fault domains.
+
+From your perspective:
+
+Internet
+   |
+Cloud LB
+   |
+App instances
+
+But internally it's much more like:
+
+                 Cloud LB
+                    |
+        ┌───────────┼───────────┐
+        ↓           ↓           ↓
+    LB nodes      LB nodes    LB nodes
+        |           |           |
+        └───────────┼───────────┘
+                    |
+               App instances
+
+The infrastructure provider handles much of the redundancy and scaling machinery.
+
+For system design interviews, this is often sufficient:
+
+"I'll use a managed highly available LB rather than building the LB infrastructure ourselves."
+
+Then focus on the application architecture.
+
+13. Health checking happens at multiple levels
+
+Remember we discussed backend health checks.
+
+The same principle applies to the LB layer.
+
+Suppose:
+
+            LB Fleet
+
+     LB-1 ✅   LB-2 ✅   LB-3 ❌
+
+A higher layer should detect:
+
+LB-3 unhealthy
+
+and stop sending new traffic there.
+
+So you can have:
+
+Layer 1
+   ↓
+detect unhealthy LB nodes
+
+Layer 2
+   ↓
+detect unhealthy app instances
+
+This creates a hierarchy of health detection.
+
+14. What if all LBs in one region fail?
+
+Then you need regional failover.
+
+Example:
+
+              Global Traffic
+                    |
+        ┌───────────┼───────────┐
+        ↓           ↓           ↓
+      India      Singapore    Europe
+      Region      Region      Region
+        |           |           |
+      LB fleet    LB fleet    LB fleet
+
+Suppose India region experiences:
+
+🔥 Complete outage
+
+Global traffic management can direct new traffic toward:
+
+Singapore
+
+or another healthy region.
+
+This gives you regional high availability.
+
+15. DNS vs Anycast — interview distinction
+DNS-based routing
+Client
+  ↓
+DNS
+  ↓
+Region / LB IP
+
+Advantages:
+
+easy conceptually
+geographic routing
+weighted routing
+failover support
+
+Problems:
+
+DNS caching
+TTL delays
+client/resolver behavior
+Anycast
+Client
+  ↓
+Same IP
+  ↓
+nearest/appropriate advertised location
+
+Advantages:
+
+very fast global routing
+resilient network entry
+avoids depending entirely on DNS for every failover decision
+
+But:
+
+networking is more sophisticated
+route propagation matters
+traffic engineering becomes complex
+16. Another important issue: LB state
+
+An interviewer may ask:
+
+"What happens if LB-1 dies while it has active connections?"
+
+For a connection-oriented protocol like TCP:
+
+Client
+   |
+   v
+LB-1
+   |
+   v
+App
+
+If LB-1 suddenly dies, that connection may be broken.
+
+LB-2 generally cannot magically continue the exact same TCP connection unless the architecture specifically supports some form of connection/state continuity.
+
+The client may have to:
+
+reconnect
+
+and the new connection goes to:
+
+LB-2
+
+This is one reason application protocols and clients need sensible retry behavior.
+
+17. Why stateless application servers make LB failover easy
+
+Suppose:
+
+User
+ ↓
+LB-1
+ ↓
+App-1
+
+LB-1 dies.
+
+New request:
+
+User
+ ↓
+LB-2
+ ↓
+App-7
+
+This works easily when:
+
+App-1 ≠ required
+
+because state is external:
+
+             App servers
+             /    |    \
+            /     |     \
+          Redis   DB   Kafka
+
+If session state lives inside App-1:
+
+App-1
+  |
+session = XYZ
+
+then LB failover can break the user session.
+
+Again:
+
+Stateless services make infrastructure failover much easier.
+
+18. What about connections to backend servers?
+
+Another common misconception:
+
+"LB sends every HTTP request to a different server."
+
+Not necessarily.
+
+With HTTP/1.1 keep-alive, HTTP/2, or HTTP/3, connections can be long-lived.
+
+The LB may establish a connection with a backend and route multiple requests over it depending on architecture and protocol.
+
+For example:
+
+Client
+   |
+ long-lived connection
+   |
+  LB
+   |
+ backend connection
+   |
+ App-2
+
+So the real behavior depends heavily on:
+
+protocol
+LB implementation
+connection reuse
+HTTP version
+routing policy
+
+For SDE-3, don't oversimplify this into "one request = one TCP connection."
+
+19. What if traffic suddenly doubles?
+
+Suppose:
+
+Normal:
+LB-1 → 40%
+LB-2 → 40%
+LB-3 → 20%
+
+Traffic doubles.
+
+The LB fleet needs enough aggregate capacity.
+
+You can:
+
+LB-1
+LB-2
+LB-3
+LB-4
+LB-5
+
+and distribute traffic across the fleet.
+
+Again this becomes a horizontal scaling problem, exactly like application servers.
+
+20. Connection limits become important
+
+An LB can be CPU-limited, but it can also hit:
+
+maximum connections
+TLS handshakes
+network bandwidth
+packets/sec
+memory
+NAT/connection tracking
+
+For HTTPS, TLS processing can become significant.
+
+For high-scale systems, load balancing architecture therefore considers more than:
+
+requests/sec
+
+You may need to think about:
+
+connections/sec
+concurrent connections
+bytes/sec
+packets/sec
+TLS termination capacity
+
+That's a very good SDE-3 observation.
+
+21. TLS termination
+
+Often:
+
+Client
+  |
+ HTTPS
+  |
+L7 LB
+  |
+ HTTP/internal TLS
+  |
+App
+
+The LB terminates TLS.
+
+This means the LB fleet has to handle:
+
+TLS handshakes
+encryption/decryption
+certificates
+
+So the LB itself can become CPU/network constrained.
+
+You scale the LB fleet horizontally.
+
+22. So where exactly is the "single point of failure"?
+
+A good architecture progressively removes SPOFs:
+
+Bad
+Internet
+   |
+ Single LB ❌
+   |
+Apps
+Better
+Internet
+   |
+LB-1 + LB-2
+   |
+Apps
+Better for global systems
+              Global Entry
+                   |
+       ┌───────────┼───────────┐
+       ↓           ↓           ↓
+    Region A    Region B    Region C
+       |           |           |
+    LB fleet     LB fleet    LB fleet
+       |           |           |
+    App fleet   App fleet   App fleet
+
+Now failure of:
+
+one LB → okay
+several LBs → okay
+one app server → okay
+an entire region → potentially okay
+
+provided your data/control plane is designed for it.
+
+23. The SDE-3 answer I would give
+
+If the interviewer asks:
+
+"How does your load balancer itself scale and avoid being a single point of failure?"
+
+Answer:
+
+“I would not deploy the load balancer as a single instance. The load-balancing layer itself should be a highly available fleet of nodes,
+usually distributed across failure domains. We can use active-active LBs so multiple nodes serve traffic concurrently, or active-passive with a
+standby for simpler failover. A higher-level mechanism such as DNS, a virtual IP, Anycast, or a managed cloud LB can distribute traffic to the LB fleet
+and remove unhealthy nodes. The LB nodes themselves are health-checked and horizontally scalable based on connections, throughput, CPU, TLS workload, etc.
+For global availability, I would also distribute the entry points across regions and use global traffic management to route users to healthy regions.
+Application servers should ideally be stateless, with session/cache/state stored externally, so that LB failover can safely send new requests to any
+healthy instance. During a node or region failure, existing connections may break and clients may reconnect, so retry and idempotency become important.”
+
+24. The architecture to remember
+
+For your interviews, keep this picture in your head:
+
+                         INTERNET
+                             |
+                     DNS / Anycast / GSLB
+                             |
+             ┌───────────────┼───────────────┐
+             ↓               ↓               ↓
+          REGION-A        REGION-B        REGION-C
+             |               |               |
+        ┌────┼────┐     ┌────┼────┐     ┌────┼────┐
+        ↓    ↓    ↓     ↓    ↓    ↓     ↓    ↓    ↓
+       LB1  LB2  LB3    LB1  LB2  LB3    LB1  LB2  LB3
+        \     |    /     \     |    /     \     |    /
+         \    |   /       \    |   /       \    |   /
+             APP FLEET       APP FLEET       APP FLEET
+                  |               |               |
+                  └───────────────┼───────────────┘
+                                  ↓
+                         Redis / DB / Kafka
+
+
+Q. Explain consistent hashing:
+
+“Consistent hashing is a technique used to distribute keys across a dynamic set of nodes while minimizing key movement when nodes are added or removed.
+Instead of computing hash(key) % N, we map both nodes and keys onto a circular hash space called a hash ring. For a key, we find its hash position and
+ assign it to the first node clockwise from that position.
+
+When a new node is added, only the keys in the ranges that the new node takes over need to move, rather than remapping almost the entire key space.
+Similarly, when a node is removed, its ranges are reassigned to other nodes.
+
+In practice, we use many virtual nodes per physical node because placing only one point per server can create uneven distribution and hotspots.
+Virtual nodes spread each physical server across the ring and make rebalancing more gradual.
+
+Consistent hashing is commonly used for distributed caches and sharding. However, it doesn't eliminate hot-key problems, and rebalancing still has a cost
+because affected data has to move. For persistent distributed storage, consistent hashing is typically combined with replication and a mechanism for
+safe ownership changes.”
+
+Database scaling:
+
+1. Start with a single database
+
+Imagine:
+
+Users
+  |
+  v
+Application
+  |
+  v
+MySQL
+
+Initially:
+
+10 GB data
+1,000 QPS
+
+Everything works.
+
+Then you grow to:
+
+5 TB data
+100,000 QPS
+
+Problems appear:
+
+CPU high
+Disk IO high
+Too many connections
+Large indexes
+Slow queries
+Backups take longer
+Single machine storage limit
+
+Database scaling usually happens progressively:
+
+Single DB
+   ↓
+Better indexing/query optimization
+   ↓
+Vertical scaling
+   ↓
+Caching
+   ↓
+Read replicas
+   ↓
+Partitioning/sharding
+
+You normally don't jump to sharding on day one.
+
+2. Vertical scaling first
+
+Simplest approach:
+
+8 CPU / 32 GB RAM
+        ↓
+64 CPU / 256 GB RAM
+
+Databases often benefit greatly from more:
+
+RAM
+CPU
+SSD IOPS
+network bandwidth
+
+More RAM is especially useful because databases cache frequently accessed pages/indexes in memory.
+
+But eventually one machine reaches a limit.
+
+That's when you need horizontal database scaling.
+
+3. Horizontal Partitioning
+
+Suppose you have:
+
+Users table
+100 million rows
+
+Instead of storing everything in one place, split the rows.
+
+Example:
+
+Partition 1:
+users 1 – 10M
+
+Partition 2:
+users 10M – 20M
+
+Partition 3:
+users 20M – 30M
+
+This is horizontal partitioning.
+
+The schema is the same:
+
+user_id
+name
+email
+...
+
+but different rows are stored separately.
+
+Contrast this with vertical partitioning, where you'd split columns or functional domains.
+
+For system design, horizontal partitioning is much more closely related to sharding.
+
+4. Partitioning vs Sharding
+
+These terms are often used interchangeably, but a useful distinction is:
+
+Partitioning
+
+Data is divided into partitions, potentially inside the same database system.
+
+DB Server
+
+Partition A
+Partition B
+Partition C
+Sharding
+
+Partitions are distributed across independent database nodes.
+
+Shard 1 → DB Server 1
+Shard 2 → DB Server 2
+Shard 3 → DB Server 3
+
+So:
+
+Sharding is essentially horizontal partitioning across multiple database servers.
+
+That's a good interview definition.
+
+5. Why shard?
+
+Suppose one DB can sustainably handle:
+
+20k writes/sec
+2 TB storage
+
+But your system needs:
+
+100k writes/sec
+10 TB storage
+
+You could distribute across five shards:
+
+                 App
+                  |
+        ┌─────────┼─────────┐
+        ↓         ↓         ↓
+      Shard1    Shard2    Shard3 ...
+
+Now both:
+
+storage
+write throughput
+
+are distributed.
+
+But sharding introduces a major problem:
+
+How do I decide which shard owns which row?
+
+That brings us to sharding strategies.
+
+6. Range-based sharding
+
+Suppose users are sharded by userId.
+
+1 – 1,000,000       → Shard A
+1,000,001 – 2M      → Shard B
+2,000,001 – 3M      → Shard C
+
+This is range sharding.
+
+Another example:
+
+Orders Jan–Apr → Shard 1
+Orders May–Aug → Shard 2
+Orders Sep–Dec → Shard 3
+Advantages
+
+Range queries are easy.
+
+Suppose:
+
+WHERE user_id BETWEEN 100000 AND 200000
+
+You know exactly which shard contains the data.
+
+It's also simple to understand and route.
+
+Main problem: hotspots
+
+Imagine IDs increase monotonically:
+
+1001
+1002
+1003
+1004
+...
+
+All new writes might go to:
+
+latest range → Shard C
+
+So:
+
+Shard A → mostly idle
+Shard B → mostly idle
+Shard C → overloaded
+
+This is a hot shard.
+
+Range sharding is therefore great when range access matters, but dangerous when traffic is concentrated on one range.
+
+7. Hash-based sharding
+
+Instead of ranges:
+
+shard = hash(userId) % N
+
+Example:
+
+hash(101) % 4 → Shard 2
+hash(102) % 4 → Shard 0
+hash(103) % 4 → Shard 3
+
+Keys get spread more evenly.
+
+Advantages
+
+Excellent for distributing:
+
+reads
+writes
+storage
+
+across shards.
+
+Usually fewer hotspots than simple range partitioning.
+
+Problem
+
+Range queries become difficult.
+
+Suppose:
+
+WHERE user_id BETWEEN 1000 AND 2000
+
+Those users may exist across:
+
+Shard 1
+Shard 2
+Shard 3
+Shard 4
+
+So you need scatter-gather queries.
+
+Also:
+
+hash(key) % N
+
+creates major redistribution when N changes.
+
+That's why systems may use techniques like consistent hashing or controlled partition maps.
+
+8. Geo-based sharding
+
+Now suppose you're building a global system.
+
+You might shard by geography:
+
+India users     → India DB
+European users  → EU DB
+US users        → US DB
+
+This is geo sharding.
+
+Advantages:
+
+lower latency
+data residency
+regulatory compliance
+regional isolation
+
+For example:
+
+Indian user
+   ↓
+Mumbai region DB
+
+instead of:
+
+Indian user
+   ↓
+Virginia DB
+
+But there are challenges.
+
+What if an Indian user interacts with a European user?
+
+Now you have:
+
+cross-shard
+cross-region
+
+operations.
+
+And what happens if a user relocates permanently?
+
+You may need data migration.
+
+9. Choosing a shard key
+
+This is one of the most important sharding decisions.
+
+Suppose you're designing orders.
+
+Possible shard key:
+
+orderId
+
+But most queries are:
+
+SELECT * FROM orders WHERE user_id = ?
+
+If you shard by orderId, all of one user's orders may be spread everywhere.
+
+That's poor locality.
+
+Better might be:
+
+shardKey = userId
+
+Then:
+
+all orders for user 123
+      ↓
+same shard
+
+This improves:
+
+query locality
+transactions
+performance
+
+A strong shard key should generally have:
+
+high cardinality
+good distribution
+stable value
+alignment with access patterns
+low hotspot risk
+10. Bad shard-key example
+
+Suppose you shard orders by:
+
+country
+
+Your data:
+
+India → 60%
+US    → 20%
+UK    → 10%
+others → 10%
+
+Now one shard gets:
+
+60% traffic
+
+That's terrible distribution.
+
+This is called skew.
+
+So don't blindly choose fields with low cardinality such as:
+
+country
+status
+gender
+paymentType
+
+unless you've carefully designed sub-partitioning.
+
+11. Cross-shard queries
+
+Suppose:
+
+Shard A → users 1–1M
+Shard B → users 1M–2M
+Shard C → users 2M–3M
+
+Now you ask:
+
+SELECT COUNT(*) FROM users;
+
+No single shard knows the answer.
+
+You need:
+
+Query all shards
+      ↓
+aggregate results
+
+This is called scatter-gather.
+
+It increases:
+
+latency
+network cost
+failure probability
+
+Cross-shard joins are even worse.
+
+Therefore:
+
+Good sharding is mostly about designing data so common queries remain single-shard.
+
+That's a very strong SDE-3 point.
+
+12. Cross-shard transactions
+
+Suppose:
+
+User A → Shard 1
+User B → Shard 2
+
+Transfer:
+
+A - ₹100
+B + ₹100
+
+Now one transaction touches two shards.
+
+A normal local DB transaction won't cover both.
+
+You may need:
+
+2PC
+Saga
+distributed transaction coordinator
+application-level workflow
+
+This dramatically increases complexity.
+
+Hence:
+
+Shard boundaries should ideally align with transaction boundaries.
+
+13. Re-sharding
+
+Suppose:
+
+4 shards
+
+are nearly full.
+
+You need:
+
+8 shards
+
+How do you move data?
+
+That's re-sharding.
+
+Naively changing:
+
+hash(key) % 4
+
+to:
+
+hash(key) % 8
+
+remaps a huge amount of data.
+
+Instead, systems may use:
+
+virtual partitions
+consistent hashing
+logical partition maps
+online range migration
+
+Then you move selected partitions gradually.
+
+A production re-sharding process might look like:
+
+Old shard
+   ↓
+copy partition
+   ↓
+sync new writes
+   ↓
+switch routing
+   ↓
+validate
+   ↓
+delete old copy later
+
+Re-sharding can be one of the most operationally difficult parts of running large databases.
+
+14. Replication
+
+Sharding answers:
+
+Which server owns the data?
+
+Replication answers:
+
+How many copies of that data exist?
+
+Suppose:
+
+Primary
+   |
+   +---- Replica 1
+   +---- Replica 2
+
+All contain copies of the same shard/data.
+
+Why?
+
+Main reasons:
+
+availability
+fault tolerance
+read scalability
+disaster recovery
+15. Leader–Follower replication
+
+Common architecture:
+
+                 Writes
+                   |
+                   v
+                Leader
+               /      \
+              v        v
+          Replica 1  Replica 2
+              ^        ^
+              |        |
+             Reads    Reads
+
+Leader handles writes.
+
+Followers replicate data from leader.
+
+Often reads can be served from followers.
+
+16. Synchronous replication
+
+Suppose client writes:
+
+X = 100
+
+With synchronous replication:
+
+Client
+  ↓
+Leader
+  ↓
+Replica
+  ↓
+ACK
+  ↓
+Leader responds SUCCESS
+
+The leader waits for replication acknowledgement before confirming.
+
+Benefit
+
+Lower chance of acknowledged data loss.
+
+If leader dies immediately:
+
+Leader 💥
+
+the replica already has the data.
+
+Cost
+
+Higher write latency.
+
+Your write latency now includes:
+
+network latency
+replica disk latency
+coordination
+
+If the replica is in another region:
+
+Mumbai → Virginia
+
+this can be significant.
+
+17. Asynchronous replication
+
+Flow:
+
+Client
+  ↓
+Leader
+  ↓
+commit locally
+  ↓
+SUCCESS
+
+later:
+Leader → Replica
+Benefit
+
+Lower write latency and high throughput.
+
+Problem
+
+Replication lag.
+
+Suppose:
+
+Leader:
+balance = ₹5,000
+
+Replica:
+balance = ₹10,000
+
+because the update hasn't arrived yet.
+
+A read from replica may return stale data.
+
+18. Data loss with async replication
+
+Consider:
+
+1. Client writes X=100
+2. Leader commits
+3. Leader responds SUCCESS
+4. Before replication...
+5. Leader crashes 💥
+
+Replica still has:
+
+X=50
+
+If replica becomes leader:
+
+X=100
+
+may be lost.
+
+So asynchronous replication trades durability/consistency during failover for performance.
+
+19. Semi-synchronous / quorum replication
+
+Many real systems use a middle ground.
+
+For example:
+
+3 replicas
+
+Wait for:
+
+Leader + 1 follower
+
+rather than all replicas.
+
+This gives better durability than pure async while avoiding waiting for the slowest replica.
+
+Conceptually:
+
+Write
+ ↓
+Leader
+ ├── Replica A ✅
+ └── Replica B slow
+
+majority reached
+ ↓
+SUCCESS
+
+This connects directly to consensus/quorum ideas.
+
+20. Read replicas
+
+Suppose your workload is:
+
+95% reads
+5% writes
+
+One primary gets overloaded mostly by reads.
+
+You can add:
+
+Primary
+  |
+  ├── Read Replica 1
+  ├── Read Replica 2
+  └── Read Replica 3
+
+Architecture:
+
+Writes
+   ↓
+Primary
+
+Reads
+ ↓
+Load Balancer
+ /    |    \
+R1    R2    R3
+
+Now read throughput scales horizontally.
+
+21. Read replica problem: stale reads
+
+Suppose:
+
+User updates profile picture
+
+Write goes to primary.
+
+Immediately:
+
+GET /profile
+
+gets routed to a replica.
+
+Replica hasn't caught up.
+
+User sees old picture.
+
+This is replication lag.
+
+Solutions include:
+
+read-after-write from primary
+session stickiness
+LSN/version-aware routing
+wait until replica catches up
+
+For critical reads, route to primary.
+
+For less important reads, replicas are fine.
+
+22. Don't send all reads to replicas blindly
+
+Example:
+
+Available stock = 1
+
+If checkout reads stock from a lagging replica:
+
+Replica says 1
+
+but primary already has:
+
+0
+
+you can make a bad decision.
+
+For critical state transitions:
+
+The authoritative check should occur on the primary/consistent data path, not a possibly stale replica.
+
+23. Leader election
+
+Now suppose the leader crashes:
+
+Leader 💥
+
+Replica A ✅
+Replica B ✅
+
+Who becomes the new leader?
+
+That's leader election.
+
+In robust distributed systems, replicas/coordination mechanisms choose a new leader using consensus-like mechanisms.
+
+Conceptually:
+
+Leader dies
+   ↓
+failure detected
+   ↓
+election
+   ↓
+Replica A becomes leader
+   ↓
+routing updated
+24. Why leader election is tricky
+
+Imagine network partition:
+
+A ----X---- B
+
+A thinks:
+
+B died
+
+B thinks:
+
+A died
+
+If both become leader:
+
+Leader A
+Leader B
+
+you have split brain.
+
+Both could accept writes.
+
+Example:
+
+A: balance = 5000
+B: balance = 7000
+
+Later network reconnects.
+
+Now which value is correct?
+
+That's why leader election generally relies on:
+
+quorum
+term/epoch numbers
+fencing
+consensus
+
+rather than simple heartbeats alone.
+
+25. Failover
+
+Failover means:
+
+Old leader unavailable
+       ↓
+New leader promoted
+       ↓
+applications reconnect
+
+Good failover must handle:
+
+detect failure
+choose new leader
+prevent split brain
+update routing/service discovery
+ensure clients retry safely
+
+Applications need retry logic because during failover you may briefly receive:
+
+connection errors
+timeouts
+read-only errors
+26. Failover + idempotency
+
+Imagine:
+
+INSERT payment
+
+Client sends request.
+
+DB commits it.
+
+Before response reaches client:
+
+leader crashes
+
+Client doesn't know whether operation succeeded.
+
+It retries.
+
+Without idempotency:
+
+payment inserted twice ❌
+
+So failover-aware systems need idempotent write APIs or uniqueness constraints.
+
+This is where database reliability and application design meet.
+
+27. Indexing
+
+Scaling a database isn't only about adding machines.
+
+Often the biggest improvement is simply:
+
+Create the right index.
+
+Suppose table has:
+
+100 million users
+
+Query:
+
+SELECT *
+FROM users
+WHERE email = 'abc@gmail.com';
+
+Without index:
+
+scan potentially 100M rows
+
+With an index:
+
+find relevant row efficiently
+28. B-Tree index
+
+B-Tree/B+Tree-style indexes are common in relational databases.
+
+Conceptually:
+
+             [50]
+            /    \
+         [20]    [80]
+        /   \    /  \
+
+They keep keys ordered.
+
+Therefore they support both:
+
+exact lookup
+
+and:
+
+range queries
+
+Examples:
+
+WHERE id = 123
+
+and:
+
+WHERE price BETWEEN 1000 AND 5000
+
+also:
+
+ORDER BY created_at
+
+can often benefit from ordered indexes.
+
+29. Why databases often use B+ Trees
+
+Practically, relational DB indexes are often variants of B+ Trees.
+
+The important interview idea isn't B-tree academic details.
+
+Know:
+
+balanced
+ordered
+high fan-out
+few disk-page accesses
+good point queries
+good range queries
+
+High fan-out means a shallow tree even with millions/billions of rows.
+
+30. LSM Tree
+
+LSM stands for Log-Structured Merge Tree.
+
+Rather than updating a large on-disk tree for every write, writes are typically:
+
+written to WAL
+      ↓
+written to memory structure
+      ↓
+flushed as immutable files
+      ↓
+compacted later
+
+Conceptually:
+
+Write
+ ↓
+WAL
+ ↓
+MemTable
+ ↓
+SSTable
+ ↓
+Compaction
+
+This architecture is common in write-heavy distributed databases/storage engines.
+
+31. Why LSM Trees are good for writes
+
+Disk prefers large sequential writes over lots of random updates.
+
+LSM converts many updates into:
+
+sequential append/flush
+
+So write throughput can be excellent.
+
+But reads may need to search:
+
+MemTable
+SSTable 1
+SSTable 2
+SSTable 3
+...
+
+Bloom filters and indexes help reduce this overhead.
+
+32. B-Tree vs LSM Tree
+Characteristic	B-Tree/B+Tree	LSM Tree
+Point reads	Excellent	Good
+Range scans	Excellent	Good, depends on engine
+Writes	Good	Excellent
+Write amplification	Can occur	Compaction can be significant
+Read amplification	Usually lower	Can be higher
+Storage amplification	Moderate	Can increase due to multiple levels/files
+Typical strength	Read-heavy / balanced OLTP	Write-heavy workloads
+
+The important point is not:
+
+B-tree good, LSM bad.
+
+It's:
+
+They optimize different IO patterns.
+
+33. Compaction in LSM
+
+Suppose SSTables accumulate:
+
+SSTable1
+SSTable2
+SSTable3
+SSTable4
+
+Old and new versions of the same key may exist.
+
+Compaction merges them:
+
+SSTable1 + SSTable2 + ...
+        ↓
+new compacted SSTables
+
+This:
+
+removes overwritten values
+removes tombstones eventually
+organizes data
+
+But compaction consumes:
+
+CPU
+disk IO
+network/storage bandwidth
+
+This can cause latency spikes.
+
+A very common production concern.
+
+34. Composite Index
+
+Suppose query:
+
+SELECT *
+FROM orders
+WHERE user_id = ?
+AND status = ?;
+
+You could create:
+
+INDEX(user_id, status)
+
+This is a composite index.
+
+The order matters.
+
+For an index:
+
+(user_id, status, created_at)
+
+it's naturally useful when queries use the leftmost prefix:
+
+user_id
+
+user_id + status
+
+user_id + status + created_at
+
+But usually not as effectively for:
+
+status alone
+
+This is often called the leftmost-prefix principle.
+
+Exact optimizer behavior depends on the database, but this is the right conceptual model.
+
+35. Composite index ordering example
+
+Suppose queries are mostly:
+
+WHERE user_id = ?
+ORDER BY created_at DESC
+
+A useful index may be:
+
+(user_id, created_at)
+
+Now the DB can locate one user's records already organized around created time.
+
+Much better than independent indexes in some workloads.
+
+36. Covering Index
+
+Consider:
+
+SELECT user_id, status
+FROM orders
+WHERE user_id = 100;
+
+Suppose index contains:
+
+(user_id, status)
+
+The DB may be able to answer the entire query from the index without fetching the base table row.
+
+That's a covering index.
+
+Conceptually:
+
+Index lookup
+   ↓
+all needed columns present
+   ↓
+return result
+
+rather than:
+
+Index
+ ↓
+find row pointer
+ ↓
+table lookup
+ ↓
+return
+
+This can significantly reduce IO.
+
+37. But covering indexes aren't free
+
+If you put every column into an index:
+
+huge index
+
+then:
+
+more disk
+more memory
+slower writes
+more maintenance
+
+Every INSERT/UPDATE may need to update those indexes.
+
+Therefore:
+
+Indexes optimize reads by adding storage and write cost.
+
+38. Partial Index
+
+Suppose an orders table has:
+
+100 million rows
+
+but only:
+
+2 million ACTIVE orders
+
+Common query:
+
+WHERE status = 'ACTIVE'
+
+Instead of indexing all 100M rows, some databases allow a partial index conceptually like:
+
+CREATE INDEX ...
+WHERE status = 'ACTIVE';
+
+Now only relevant rows are indexed.
+
+Benefits:
+
+smaller index
+faster lookup
+less storage
+
+Useful when queries repeatedly target a specific subset.
+
+Support and exact syntax vary by database.
+
+39. Index selectivity
+
+Suppose:
+
+gender
+
+has only:
+
+M
+F
+Other
+
+An index may not help much if half the table matches.
+
+But:
+
+email
+
+is nearly unique.
+
+That's highly selective.
+
+Indexes are especially valuable for high-selectivity filters.
+
+This is why:
+
+INDEX(status)
+
+isn't automatically useful if 90% of rows have the same status.
+
+40. Over-indexing
+
+Suppose table has:
+
+20 indexes
+
+Every insert may require updating:
+
+table
+index1
+index2
+...
+index20
+
+Now writes become expensive.
+
+So an SDE-3 engineer should ask:
+
+Which queries justify this index?
+What is read/write ratio?
+How selective is it?
+How large will it become?
+
+Don't create indexes blindly.
+
+41. SQL vs NoSQL
+
+This question should never be answered as:
+
+SQL = old
+NoSQL = scalable
+
+That's wrong.
+
+Modern SQL systems can scale enormously.
+
+The choice should come from:
+
+data model
+access patterns
+consistency needs
+transactions
+query complexity
+scale
+operational requirements
+42. When SQL is a strong choice
+
+SQL databases are excellent when you need:
+
+relational data
+ACID transactions
+joins
+constraints
+unique keys
+complex queries
+strong consistency
+
+Example:
+
+Orders
+Payments
+Users
+Refunds
+
+with relationships:
+
+User → Orders → Payment
+
+and invariants such as:
+
+one payment belongs to one order
+order must reference valid user
+transactional update across tables
+
+SQL fits very naturally.
+
+43. SQL example: payment system
+
+Suppose transaction:
+
+Debit account
+Create payment
+Update ledger
+
+You may want:
+
+BEGIN
+
+UPDATE account...
+INSERT payment...
+INSERT ledger...
+
+COMMIT
+
+Either:
+
+all succeed
+
+or:
+
+all rollback
+
+Relational databases shine here.
+
+44. When NoSQL is attractive
+
+NoSQL can be a great choice when:
+
+huge scale
+simple predictable access patterns
+flexible schema
+very high write throughput
+easy horizontal partitioning
+denormalized data
+
+Example:
+
+GET user profile by userId
+
+You may not need joins.
+
+A key-value/document store can be excellent.
+
+45. Different NoSQL types matter
+
+"NoSQL" isn't one database model.
+
+You have:
+
+Key-value
+Document
+Wide-column
+Graph
+
+Examples conceptually:
+
+Key-value:
+userId → profile
+
+Document:
+JSON-like product/user objects
+
+Wide-column:
+huge sparse/write-heavy datasets
+
+Graph:
+relationships and traversals
+
+Choose based on access pattern.
+
+46. SQL vs NoSQL example: product catalog
+
+Suppose product:
+
+{
+  "id": 123,
+  "name": "Laptop",
+  "brand": "Dell",
+  "specs": {
+    "ram": "16GB",
+    "cpu": "i7"
+  }
+}
+
+Different categories have different fields.
+
+Laptop:
+
+RAM
+CPU
+GPU
+
+Shoe:
+
+size
+material
+color
+
+A document database can make flexible product attributes convenient.
+
+But payment/order ledger might remain in SQL.
+
+Again:
+
+One system can—and usually does—use multiple database technologies.
+
+47. Polyglot persistence
+
+An e-commerce architecture might use:
+
+Orders      → MySQL/Postgres
+Catalog     → Document DB
+Cart        → Redis
+Search      → OpenSearch
+Analytics   → data warehouse
+Events      → Kafka
+
+This is called polyglot persistence.
+
+Each technology serves a particular access pattern.
+
+That's often more realistic than trying to force one database to solve every problem.
+
+48. SQL vs NoSQL decision framework
+
+Here's how I'd reason in an interview:
+
+Question	Likely direction
+Need multi-row ACID transactions?	SQL
+Complex joins?	SQL
+Strong relational constraints?	SQL
+Simple key-based lookup at massive scale?	NoSQL may fit
+Flexible/evolving document schema?	Document DB
+Write-heavy distributed workload?	Wide-column/LSM-oriented DB
+Complex graph traversal?	Graph DB
+Full-text search?	Search engine
+Strong analytical aggregations?	Warehouse/OLAP DB
+
+Don't treat this as an absolute rule. Modern databases overlap considerably.
+
+49. Most important architecture: sharding + replication
+
+At scale, you often have both.
+
+                         App
+                          |
+             ┌────────────┼────────────┐
+             ↓            ↓            ↓
+          Shard A       Shard B      Shard C
+             |            |            |
+        ┌────┴────┐  ┌────┴────┐  ┌────┴────┐
+        ↓         ↓  ↓         ↓  ↓         ↓
+      Leader     R1 Leader     R1 Leader     R1
+                   replicas...
+
+Sharding gives:
+
+write/storage scalability
+
+Replication gives:
+
+availability
+read scaling
+durability
+
+They solve different problems.
+
+50. Full example: Amazon-like Order Service
+
+Suppose:
+
+500M users
+billions of orders
+
+Most queries are:
+
+get orders for user
+create order
+get order by userId + orderId
+
+A reasonable shard key might be:
+
+userId
+
+Architecture:
+
+                      Order Service
+                           |
+                    Shard Router
+                           |
+              ┌────────────┼────────────┐
+              ↓            ↓            ↓
+           Shard-1      Shard-2      Shard-3
+             |             |             |
+         Primary        Primary        Primary
+          /   \          /   \          /   \
+        R1     R2      R1     R2      R1     R2
+
+For:
+
+userId=123
+
+router computes:
+
+shard(userId)
+
+and hits one shard.
+
+Writes:
+
+→ primary
+
+eventually consistent reads:
+
+→ replicas
+
+strong read-after-write:
+
+→ primary
+
+Indexes could include:
+
+(user_id, created_at)
+
+(user_id, order_id)
+
+depending on schema/access patterns.
+
+Now most common queries are:
+
+single shard
+indexed
+
+That's what you want.
+
+51. What happens when one shard gets hot?
+
+Suppose celebrity merchant/user account creates huge traffic:
+
+userId=999
+
+Because all their data maps to one shard:
+
+Shard 7 🔥
+
+This is a hot partition.
+
+Possible mitigations include:
+
+better shard key
+composite shard key
+bucketing
+special-case hot tenants
+dedicated shard
+split partition
+cache
+
+For example instead of:
+
+shardKey = merchantId
+
+you might use:
+
+merchantId + bucketId
+
+for extremely high-volume merchants.
+
+But then querying all merchant data requires querying multiple buckets.
+
+There is always a trade-off.
+
+52. Database scaling order in a system-design interview
+
+One thing interviewers dislike is:
+
+"Traffic increased, so I'll shard."
+
+Sharding should usually be relatively late.
+
+A mature answer would be:
+
+1. Optimize queries/schema
+2. Add proper indexes
+3. Vertical scale DB if economical
+4. Introduce Redis/cache
+5. Add read replicas for read-heavy load
+6. Partition/archive large tables
+7. Shard once single-writer/storage limits become real
+
+Because:
+
+Sharding solves scale by buying complexity.
+
+Once you shard, you inherit:
+
+routing
+rebalancing
+cross-shard joins
+cross-shard transactions
+hot shards
+operational complexity
+
+Don't take that complexity before you need it.
+
+53. SDE-3 tricky distinctions
+
+Remember these:
+
+Sharding != replication
+
+Sharding:
+different data on different servers
+
+Replication:
+same data on multiple servers
+
+And:
+
+Read replica != strongly consistent by default
+
+because async replication can produce stale reads.
+
+And:
+
+Index != free performance
+
+because indexes cost:
+
+disk
+memory
+write throughput
+maintenance
+
+And:
+
+NoSQL != automatically faster
+
+Performance depends on workload and data model.
+
+54. Interview-ready explanation
+
+If the interviewer asks:
+
+"How would you scale the database?"
+
+A strong answer is:
+
+“I would first identify whether the bottleneck is reads, writes, storage, or inefficient queries. For read-heavy workloads, I'd add proper indexes, caching, and read replicas. Replicas can use synchronous replication when stronger durability and consistency are required, or asynchronous replication when lower write latency is more important, accepting replication lag.
+
+If the primary becomes the write or storage bottleneck, I'd horizontally partition the data using an appropriate shard key. Range sharding preserves locality and range-query efficiency but can create hotspots; hash sharding gives better distribution but makes range queries and resizing harder; geographic sharding helps with latency and data residency.
+
+Each shard should normally have replicas for availability. A leader handles writes, followers replicate, and a quorum/consensus mechanism should handle leader election and prevent split brain during failure.
+
+At the query level, I'd choose indexes based on access patterns: B-tree indexes are excellent for point and range queries, while LSM-based storage engines favor high write throughput but pay compaction and read-amplification costs. Composite, covering, and partial indexes can further optimize common queries, but over-indexing hurts write performance.
+
+Finally, SQL vs NoSQL should be driven by transactions, relationships, query patterns, consistency, schema flexibility and scale—not by a generic assumption that NoSQL is more scalable.”
+
+55. The mental model to memorize
+                 DATABASE SCALING
+                       |
+        ┌──────────────┼──────────────┐
+        ↓              ↓              ↓
+      Reads          Writes         Queries
+        |              |              |
+     Cache          Sharding        Indexes
+ Read replicas    Partitioning
+        |              |
+        ↓              ↓
+ Replication      Range / Hash / Geo
+        |
+ Sync / Async
+        |
+ Leader election
+ Failover
+
+And at the very bottom:
+
+SQL vs NoSQL
+     ↓
+Choose based on
+access pattern + invariants
+not hype

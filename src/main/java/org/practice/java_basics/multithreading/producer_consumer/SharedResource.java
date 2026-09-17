@@ -3,7 +3,7 @@ package org.practice.java_basics.multithreading.producer_consumer;
 public class SharedResource {
 
     int data;
-    boolean isAvailable;
+    volatile boolean isAvailable;
 
     public SharedResource() {
         data = -1; // -1 represents no data state

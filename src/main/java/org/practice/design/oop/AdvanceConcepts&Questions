@@ -1,0 +1,205 @@
+1. OOP Fundamentals
+
+Think of OOP as modeling a system using objects that contain state + behavior.
+
+Concept	Simple meaning	Java example	Interview point
+Abstraction	Expose what something does, hide how	PaymentProcessor interface	Interfaces/abstract classes
+Encapsulation	Keep data + behavior together and control access	private balance + deposit()	Protect invariants
+Inheritance	Child gets behavior/state from parent	Dog extends Animal	is-a relationship
+Polymorphism	Same interface, different implementations	payment.pay() → UPI/Card	Runtime polymorphism
+Association	Two objects interact/know each other	Teacher ↔ Student	Generic relationship
+Aggregation	Weak ownership	Team has Players	Child can survive parent
+Composition	Strong ownership	House has Rooms	Child lifecycle tied to parent
+Abstraction
+
+Hide implementation details and expose only necessary behavior.
+
+public interface PaymentProcessor {
+    void pay(double amount);
+}
+
+public class UpiPaymentProcessor implements PaymentProcessor {
+    public void pay(double amount) {
+        // UPI-specific implementation
+    }
+}
+
+Caller only knows:
+
+processor.pay(1000);
+
+It doesn't care how UPI payment happens.
+
+Interview: Abstraction reduces complexity and allows implementations to change independently.
+
+Encapsulation
+
+Restrict direct access to internal state.
+
+class BankAccount {
+
+    private double balance;
+
+    public void deposit(double amount) {
+        if (amount <= 0)
+            throw new IllegalArgumentException();
+
+        balance += amount;
+    }
+
+    public double getBalance() {
+        return balance;
+    }
+}
+
+Bad design:
+
+public double balance;
+
+Now anybody can do:
+
+account.balance = -10000;
+
+Encapsulation protects business invariants.
+
+Inheritance
+
+Represents an IS-A relationship.
+
+class Vehicle {
+    void start() {}
+}
+
+class Car extends Vehicle {
+}
+
+Car IS-A Vehicle.
+
+Inheritance gives code reuse, but creates tight coupling between parent and child.
+
+Polymorphism
+
+One abstraction → multiple implementations.
+
+interface NotificationSender {
+    void send(String message);
+}
+
+class EmailSender implements NotificationSender {
+    public void send(String message) {}
+}
+
+class SmsSender implements NotificationSender {
+    public void send(String message) {}
+}
+
+Usage:
+
+NotificationSender sender = new EmailSender();
+sender.send("Order placed");
+
+Later:
+
+sender = new SmsSender();
+
+Caller doesn't change.
+
+This is heavily used in LLD through Strategy, Factory, State, Command etc.
+
+Composition vs Inheritance
+
+One of the most common LLD interview discussions.
+
+Inheritance:
+
+class ElectricCar extends Car {
+}
+
+Composition:
+
+class Car {
+
+    private Engine engine;
+
+    Car(Engine engine) {
+        this.engine = engine;
+    }
+}
+
+Now:
+
+new Car(new PetrolEngine());
+new Car(new ElectricEngine());
+
+The idea behind:
+
+Favor composition over inheritance.
+
+Composition is usually preferable because behavior can be changed, tested and extended independently.
+
+Inheritance → is-a
+
+Composition → has-a
+
+For example, Spring Boot itself heavily encourages composition:
+
+@Service
+class OrderService {
+
+    private final PaymentProcessor paymentProcessor;
+
+    OrderService(PaymentProcessor paymentProcessor) {
+        this.paymentProcessor = paymentProcessor;
+    }
+}
+
+Instead of:
+
+class OrderService extends PaymentProcessor
+
+which makes no conceptual sense.
+
+Association vs Aggregation vs Composition
+
+Think in terms of ownership.
+
+Association
+Teacher -------- Student
+
+Aggregation
+Team ◇---------- Player
+
+Composition
+House ◆---------- Room
+
+Association: objects simply interact.
+
+Doctor ↔ Patient
+
+Aggregation: parent contains child, but child can exist independently.
+
+Team → Players
+
+Delete Team → Players still exist.
+
+Composition: strong ownership.
+
+Order → OrderItems
+
+Delete Order → normally its OrderItems should also disappear.
+
+A simple interview rule:
+
+Association   → uses/knows
+Aggregation   → has-a, weak ownership
+Composition   → has-a, strong ownership
+Inheritance   → is-a
+
++    public
+-    private
+#    protected
+
+────────>   Association
+◇───────    Aggregation
+◆───────    Composition
+△───────    Inheritance

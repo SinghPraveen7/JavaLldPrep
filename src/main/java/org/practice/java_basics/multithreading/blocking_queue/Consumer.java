@@ -17,7 +17,7 @@ public class Consumer implements Runnable {
             try {
                 int data = queue.take();
                 System.out.println("Consumed Data by " + name + ": " + data);
-                Thread.sleep(100);
+                Thread.sleep(50);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }

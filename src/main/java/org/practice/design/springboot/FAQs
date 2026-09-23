@@ -1,0 +1,210 @@
+###################  Part 1: Top 20 Basic-Level Questions  #####################
+
+1. What is Spring Boot and how is it different from the Spring Framework?
+Spring Boot is built on top of the core Spring Framework. It removes boilerplate by providing auto-configuration,
+starter dependencies, and an embedded server, so you get a production-ready app with minimal XML/manual config.
+Plain Spring requires you to wire beans, configure the DispatcherServlet, and deploy a WAR yourself.
+
+2. What is Inversion of Control (IoC) and Dependency Injection (DI)?
+IoC means the framework — not your code — controls object creation and wiring.
+DI is the mechanism: Spring creates objects (beans) and injects their dependencies via constructor, setter, or field injection,
+instead of the object creating its own dependencies with new.
+
+3. What is the Spring IoC container / ApplicationContext?
+It's the container that manages the full lifecycle of beans — creation, dependency resolution, initialization, and destruction.
+ApplicationContext is the advanced container (over BeanFactory) with event propagation, AOP integration, and internationalization support.
+
+4. Difference between @Component, @Service, @Repository, @Controller?
+All are stereotypes of @Component and get auto-detected by component scanning.
+@Service marks business logic (semantic only),
+@Repository additionally enables Spring's exception translation (DB exceptions → DataAccessException), and
+@Controller/@RestController marks web layer beans (the latter adds @ResponseBody to every method).
+
+5. What is @SpringBootApplication?
+A meta-annotation combining @Configuration (marks it a config class),
+@EnableAutoConfiguration (triggers auto-config based on classpath), and
+@ComponentScan (scans the package and sub-packages for beans).
+
+6. What are Spring Boot starters?
+Curated dependency descriptors (e.g., spring-boot-starter-web, spring-boot-starter-data-jpa) that pull in a compatible,
+tested set of libraries for a feature, so you don't manually manage version conflicts.
+
+7. Constructor injection vs field injection — which is preferred and why?
+Constructor injection is preferred: it makes dependencies explicit and final, enables immutability,
+fails fast at startup if a bean is missing, and makes unit testing easy without Spring (just call the constructor).
+Field injection hides dependencies and needs reflection/Spring context for tests.
+
+8. What is @Autowired?
+Marks a dependency for Spring to inject automatically, by type (falling back to name if multiple candidates exist).
+Optional on constructors since Spring 4.3 if there's only one constructor.
+
+9. What are Spring Bean scopes?
+singleton (default, one instance per container),
+prototype (new instance every request), and web-aware scopes request, session, application.
+
+10. What is application.properties / application.yml used for?
+External configuration — DB URLs, server port, logging levels, custom app properties — kept outside code so
+behavior can change per environment without recompiling.
+
+11. What are Spring Profiles?
+A way to segregate configuration per environment (dev, qa, prod) using application-{profile}.yml and activating one
+via spring.profiles.active, so beans/config load conditionally per environment.
+
+12. What is Spring Boot Actuator?
+A set of production-ready endpoints (/actuator/health, /metrics, /env, /beans) for monitoring and managing a running application
+ — health checks, metrics export, thread dumps, etc.
+
+13. Difference between @RequestMapping and @GetMapping/@PostMapping?
+@GetMapping etc. are shortcut, HTTP-method-specific versions of @RequestMapping(method = ...), introduced for readability.
+
+14. What is @RestController?
+Combines @Controller and @ResponseBody — every method's return value is serialized directly to the response body (typically JSON)
+ instead of resolving to a view name.
+
+15. How does Spring Boot handle exceptions globally?
+Via @ControllerAdvice combined with @ExceptionHandler methods — centralizes exception-to-HTTP-response mapping
+across all controllers instead of try/catch in every method.
+
+16. What is Spring Data JPA and what problem does it solve?
+An abstraction over JPA/Hibernate that lets you define repository interfaces (JpaRepository<Entity, ID>) and
+ get CRUD + query methods generated automatically, avoiding boilerplate DAO code.
+
+17. What is the difference between JPA, Hibernate, and Spring Data JPA?
+JPA is a specification (interfaces/annotations). Hibernate is the most common implementation of that spec (does the actual ORM work).
+Spring Data JPA is a Spring abstraction on top of JPA that generates repository implementations.
+
+18. What is @Transactional?
+Declares that a method should run inside a database transaction — Spring wraps it in a proxy that begins a transaction on entry
+and commits/rolls back on exit (rollback by default on unchecked exceptions).
+
+19. How do you handle validation in Spring Boot?
+Using @Valid/@Validated on controller method parameters combined with Bean Validation annotations (@NotNull, @Size, @Email)
+on the DTO fields; validation errors are caught via MethodArgumentNotValidException in a @ControllerAdvice.
+
+20. What is the difference between @ComponentScan and @Import?
+@ComponentScan auto-discovers annotated classes (@Component, etc.) in specified packages.
+@Import explicitly registers specific @Configuration classes or beans, giving fine-grained control without scanning.
+
+
+###################  Part 2: Top 20 Senior/Staff-Level Questions — Answers  ###################
+
+1. Bean lifecycle in detail
+ Instantiate → populate properties (DI) → BeanNameAware/BeanFactoryAware callbacks → BeanPostProcessor.postProcessBeforeInitialization →
+ @PostConstruct / InitializingBean.afterPropertiesSet() → custom init-method → BeanPostProcessor.postProcessAfterInitialization
+ (this is where AOP proxies get created) → bean ready for use → on shutdown: @PreDestroy / DisposableBean.destroy().
+ BeanFactoryPostProcessor runs before any bean is instantiated and can modify bean definitions (metadata);
+ BeanPostProcessor runs after instantiation and works on bean instances (e.g., wrapping them in proxies).
+
+2. Circular dependency resolution
+ Spring resolves setter/field-injection circular deps using a 3-level cache (singleton objects, early singleton objects, singleton factories)
+ — it exposes a half-initialized bean early via ObjectFactory so the other bean can inject a reference to it before it's fully populated.
+ Constructor injection can't do this because both beans need a fully-constructed instance of each other at construction time —
+ there's no "early reference" to hand out — so Spring throws BeanCurrentlyInCreationException.
+
+3. @Component vs @Bean
+ @Component is class-level, for classes you own — detected via classpath scanning.
+ @Bean is method-level inside a @Configuration class, used when you need to instantiate a class you don't own (third-party library)
+ or need custom construction logic that annotations can't express.
+
+4. Bean scope proxy problem
+ Injecting a prototype/request-scoped bean directly into a singleton freezes it at the first-resolved instance since
+ the singleton is only wired once. Fix: inject a scoped proxy (proxyMode = ScopedProxyMode.TARGET_CLASS) so every method call
+ is routed through the proxy to fetch the current scoped instance, or inject an ObjectProvider<T>/Provider<T> and resolve lazily.
+
+5. AOP proxy mechanics
+ If the target class implements an interface, Spring uses a JDK dynamic proxy (implements the same interface,
+ delegates via InvocationHandler). If not, it falls back to CGLIB (subclasses the target class at runtime and overrides methods).
+ Self-invocation breaks @Transactional/@Async because calling this.method() from within the same class bypasses the proxy entirely
+ — the proxy's advice only triggers on external calls through the bean reference.
+
+6. Auto-configuration internals
+ @EnableAutoConfiguration triggers Spring Boot to read META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+ (pre-Boot-2.7 it was spring.factories), loading a list of @Configuration classes. Each is gated by @Conditional... annotations
+ — @ConditionalOnClass (only if a class is on the classpath), @ConditionalOnMissingBean (only if you haven't defined your own),
+ @ConditionalOnProperty — so config only activates when relevant and never overrides your explicit beans.
+
+7. Writing a custom starter
+ Create an autoconfigure module with a @Configuration class using @ConditionalOnClass/@ConditionalOnMissingBean to define default beans,
+ bind custom properties via @ConfigurationProperties, and register the class in AutoConfiguration.imports.
+ Package it as a separate -starter module that just declares the dependency, following the naming convention xxx-spring-boot-starter.
+
+8. Config precedence Highest to lowest (roughly):
+ command-line args → SPRING_APPLICATION_JSON env var → JNDI/Servlet params → System.getProperties() → OS env vars →
+ profile-specific application-{profile}.yml (external, then packaged) → application.yml (external, then packaged) →
+ @PropertySource → default properties. Profile-specific files always beat non-profile ones regardless of location.
+
+9. Embedded server internals
+ Boot bootstraps an embedded Tomcat/Jetty/Netty via ServletWebServerApplicationContext, which detects a ServletWebServerFactory bean
+ on the classpath and starts the server programmatically instead of deploying to an external container.
+ Thread pools are tuned via server.tomcat.threads.max/min-spare (Tomcat's executor) balanced against your DB connection
+ pool size to avoid threads blocked waiting on a shared resource.
+
+10. @Transactional propagation/isolation
+ REQUIRED (default) joins an existing transaction or creates one; REQUIRES_NEW always suspends any existing transaction
+ and starts a fresh one — useful for an audit-log write that must persist even if the outer transaction rolls back;
+ NESTED creates a savepoint within the existing transaction, allowing partial rollback to that point without aborting the whole transaction.
+ Isolation levels (READ_COMMITTED, REPEATABLE_READ, SERIALIZABLE) control what concurrent transactions can see of each other's
+ uncommitted/committed changes — e.g., use SERIALIZABLE for a seat-booking system to prevent double-booking, at the cost of throughput.
+
+11. Self-invocation and @Transactional
+ Same root cause as AOP proxy mechanics (Q5) — since @Transactional is itself a proxy-based advice, calling the annotated method
+ from another method in the same class skips the proxy and runs the raw method, so no transaction is opened. Fix: inject a self-reference
+ (ApplicationContext.getBean(this.getClass())) or, cleaner, move the transactional method into a separate bean and call it from there.
+
+12. Hibernate caching & N+1
+ First-level cache is the Session/EntityManager-scoped cache — always on, cleared per transaction. Second-level cache is SessionFactory-scoped
+ (shared across sessions, needs an external provider like Ehcache/Redis), caching entities across transactions. N+1 happens when fetching a
+ parent triggers one query, then a separate query per child on lazy access — fixed with JOIN FETCH in JPQL, @EntityGraph to eagerly
+ fetch specific associations, or batch fetching (@BatchSize) to group the N queries into fewer IN-clause queries.
+
+13. Optimistic vs pessimistic locking
+ Optimistic locking (@Version column) assumes low contention — it checks the version number on update and throws OptimisticLockException
+ if it changed, letting you retry or surface a conflict to the user; good for high-read, low-write scenarios like editable profiles.
+ Pessimistic locking (SELECT ... FOR UPDATE via @Lock(PESSIMISTIC_WRITE)) actually locks the row at read time, blocking other
+ transactions — used for high-contention writes like inventory decrement where retries are wasteful. Handle OptimisticLockException
+ by catching it at the service layer, reloading the entity, and either retrying the update or returning a 409 Conflict to the caller.
+
+14. Thread pool sizing
+ For CPU-bound work, pool size ≈ number of cores (+1) — more threads just cause context-switch overhead.
+ For I/O-bound work (DB calls, external APIs), size using threads = cores * (1 + wait_time/compute_time) — since threads spend most time
+ blocked waiting, you can run far more than core count concurrently. In practice, tune based on load-testing against real latency numbers,
+ not just the formula.
+
+15. Request concurrency & virtual threads
+ Traditional Spring MVC is thread-per-request on the servlet container's platform-thread pool — a blocking call (DB, HTTP) ties up an OS
+ thread for the whole duration, so scaling concurrent requests means scaling OS threads, which is expensive. With virtual threads
+ (spring.threads.virtual.enabled=true on Boot 3.2+/Java 21), each request gets a cheap virtual thread; when it blocks on I/O,
+ the underlying carrier OS thread is freed to run other virtual threads — so you get massively higher concurrency for the same blocking code,
+ without switching to reactive/WebFlux.
+
+16. Caching strategy / @Cacheable
+ @Cacheable wraps the method in a proxy (same AOP mechanism as @Transactional) — on call, it checks the configured CacheManager
+ for a key (default: method args) and returns the cached value if present, otherwise runs the method and stores the result.
+ @CacheEvict/@CachePut manage invalidation/updates. For a distributed cache with Redis, back the CacheManager with RedisCacheManager,
+ set a sane TTL, and design keys carefully to avoid stampedes (consider cache-aside with a short lock or request coalescing for hot keys).
+
+17. Resilience patterns
+ Circuit breaker (Resilience4j @CircuitBreaker) stops calling a failing downstream service after a failure threshold, failing fast instead
+ of piling up blocked calls that could exhaust your own thread pool — protects against cascading failure. Retry re-attempts a
+ transient failure (network blip) with backoff — protects against short-lived glitches, but must be idempotent-safe or it can amplify
+ load on an already-struggling service. Rate limiting caps outbound/inbound call rate to protect a downstream dependency (or yourself) from
+ being overwhelmed — a different failure mode than the other two (self-protection vs resilience to failure).
+
+18. Idempotency & distributed transactions
+ Idempotent APIs use a client-supplied idempotency key stored server-side (or natural idempotency like PUT with a full resource state)
+ so a retried request doesn't duplicate the effect. For cross-service consistency without 2PC (which needs a blocking coordinator and
+ doesn't scale well), use the Saga pattern: each service commits its local transaction and publishes an event; if a later step fails,
+ compensating transactions undo prior steps — trading strong consistency for eventual consistency and availability.
+
+19. Spring Security filter chain
+ A request passes through an ordered chain of servlet filters (SecurityFilterChain) — e.g., CorsFilter → CsrfFilter → authentication filters
+ (UsernamePasswordAuthenticationFilter or a custom JWT filter) → ExceptionTranslationFilter → FilterSecurityInterceptor/AuthorizationFilter
+ for the final access decision. For stateless JWT auth: a custom OncePerRequestFilter extracts and validates the token, builds an Authentication
+ object, and sets it on SecurityContextHolder — with SessionCreationPolicy.STATELESS so Spring never creates an HttpSession.
+
+20. Observability setup
+ Actuator exposes /health, /metrics, /info, etc. out of the box; Micrometer is the metrics facade behind it, exporting to backends like
+ Prometheus/Datadog with dimensional tags. Distributed tracing (Spring Cloud Sleuth historically, now Micrometer Tracing + OpenTelemetry)
+ propagates a trace ID/span ID across service calls via headers, so a request can be followed end-to-end across microservices.
+ For structured logging, use a JSON log encoder (Logback + logstash-encoder) and inject the trace/correlation ID into the MDC so
+ every log line across services can be correlated by request.

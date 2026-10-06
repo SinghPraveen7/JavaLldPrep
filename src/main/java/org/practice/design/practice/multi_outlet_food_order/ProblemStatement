@@ -1,0 +1,54 @@
+Multi-outlet food ordering with stock concurrency - Also, we can use same for blinkit
+
+The strongest way to attempt this problem is to design around one rule:
+Never sell stock you don't have, and never hold a lock while doing slow work like payment.
+
+1. Stock is per ingredient.
+2. View menu of outlet, show items only in stock
+3. Place multi-item order from one outlet
+4. Reverse stock, pay and then confirm, if payment fails return reversed stock back
+5. No overselling, when multiple concurrent order in place
+6. Idempotent order placement, so a double click don't place 2 orders
+
+Entities -
+
+Stock: Class
+String id, Ingredient ingredient, int quantity
+
+Ingredient: Class
+String id, String name
+
+MenuItem: Class
+String id, List<Item> items
+
+Outlet: Class
+String id, String name, MenuItem menu, Stock stock
+
+Item: Class
+String id, String name, Map<Ingredient, quantity> recipe, double price
+
+Order: Class
+String orderId, String orderPlaceBy, OrderItem item, double totalAmount,
+String outletId, OrderStatus orderStatus
+
+OrderItem: Class
+String orderItemId, Map<Item, Integer> itemQuantityDetails, boolean isAvailable
+
+OrderStatus: Enum
+CREATED, STOCK_REVERSED, CONFIRM, CANCELLED, FAILED
+
+Services -
+
+InventoryService: Class
+- addItemInStock(Map<Ingredient, Integer> itemsToAddStock)
+- getOutletMenu(String OutletId)
+- reserveItemStock(List<Item> items, String orderId)
+- releaseStock(String orderId)
+
+
+OrderService: Class
+- placeOrder(OrderItem orderItem, String orderPlacedBy, String outletId, String idempotencyKey)
+- cancelOrder(String orderId)
+
+PaymentService: Class
+- processPayment(String orderId, double amount)

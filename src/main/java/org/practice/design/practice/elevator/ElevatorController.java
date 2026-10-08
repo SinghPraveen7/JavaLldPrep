@@ -14,7 +14,7 @@ public class ElevatorController {
         elevatorSelectionStrategy = new NearestElevatorStrategy();
     }
 
-    public void requestElevator(int floor, Direction direction) {
+    public synchronized void requestElevator(int floor, Direction direction) {
         // find the best elevator
         // add request to elevator request for hall's floor
         Request hallCallRequest = new Request(floor, direction, RequestType.HALL_CALL);

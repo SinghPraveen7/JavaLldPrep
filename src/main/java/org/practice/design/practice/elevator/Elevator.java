@@ -6,10 +6,10 @@ import java.util.TreeSet;
 public class Elevator {
 
     private static final int MAX_FLOOR = 10;
-    int id;
-    int currentFloor;
-    Direction direction;
-    Set<Request> requests;
+    private int id;
+    private int currentFloor;
+    private Direction direction;
+    private Set<Request> requests;
 
     public Elevator() {
         requests = new TreeSet<>();
@@ -17,7 +17,7 @@ public class Elevator {
 
     // This method can be directly called inside elevator also - destination requests
     // This is called to add hall call requests and destination requests
-    public void addRequest(Request request) {
+    public synchronized void addRequest(Request request) {
         requests.add(request);
     }
 
@@ -47,10 +47,6 @@ public class Elevator {
 
     public Set<Request> getRequests() {
         return requests;
-    }
-
-    public void setRequests(Set<Request> requests) {
-        this.requests = requests;
     }
 
     // This can also be strategy - FIFO or SCAN

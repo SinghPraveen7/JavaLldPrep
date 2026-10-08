@@ -34,7 +34,7 @@ public class SeatSelectionService {
         return lockService.isSeatLocked(selectedSeat, userId, show.getShowId());
     }
 
-    public void unlockSeats(List<Seat> bookedSeats, String userId, Show show) {
+    public synchronized void unlockSeats(List<Seat> bookedSeats, String userId, Show show) {
         lockService.unlockSeat(bookedSeats, userId, show.getShowId());
     }
 }

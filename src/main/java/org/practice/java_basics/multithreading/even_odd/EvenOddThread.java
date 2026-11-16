@@ -20,7 +20,7 @@ public class EvenOddThread {
 class NumberPrinter {
 
     int max;
-    boolean isOddTurn;
+    volatile boolean isOddTurn;
 
     public NumberPrinter(int max) {
         this.max = max;

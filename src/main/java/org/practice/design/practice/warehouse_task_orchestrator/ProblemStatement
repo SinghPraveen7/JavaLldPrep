@@ -1,0 +1,25 @@
+A warehouse where robots are used to do tasks
+There are N numbers of robots
+Each robots are assigned task
+Task is like picking item from certain position and put to target position
+A robot can do 1 task at a time
+
+class WarehouseTaskOrchestrator:
+ConcurrentHashMap<Integer, Task> tasks
+ConcurrentHashMap<Integer, ReentrantLock> robotLocks
+RobotSelectionStrategy robotSelectionStrategy
+assignTaskToRobot(int taskId)
+
+interface RobotSelectionStrategy
+selectBestRobot()
+
+class NearestRobotStrategy implements RobotSelectionStrategy
+
+class Robot:
+int robotId, boolean isAvailable, assignTask(Task task)
+
+class Task:
+int taskId, int sourceDistance, int tagetDistance, TaskState taskState
+
+enum TaskState:
+CREATED, ASSIGNED, IN_PROGRESS, COMPLETED, FAILED

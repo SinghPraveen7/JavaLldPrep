@@ -1,5 +1,6 @@
 package org.practice.java_basics.multithreading.virtual_thread;
 
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
@@ -18,9 +19,9 @@ public class VirtualThreadCompare {
         int taskCount = 1000;
         long startTime = System.currentTimeMillis();
         // can't create 1000 platform threads, as it may choke our OS capacity
-        // possible execption like- Execption in thread "main" java.lang.OutOfMemoryError: unable to create native thread:
-        // possibly out of memory or process/resource limits reached
-        var executor = Executors.newFixedThreadPool(100);
+        // if we create large number of platform thread, possible execption like- Execption in thread "main" java.lang.OutOfMemoryError: 
+        // unable to create native thread: possibly out of memory or process/resource limits reached
+        ExecutorService executor = Executors.newFixedThreadPool(100);
         try {
             for (int i = 0; i < taskCount; i++) {
                 executor.submit(() -> {

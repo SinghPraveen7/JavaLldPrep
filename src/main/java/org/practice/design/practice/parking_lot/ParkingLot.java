@@ -31,7 +31,9 @@ public class ParkingLot {
 
 
     public synchronized ParkingSpot getFreeSpot(Size vehicleSize) {
-        return spotAllocationStrategy.getFreeSpot(vehicleSize, parkingSpots);
+        ParkingSpot spot = spotAllocationStrategy.getFreeSpot(vehicleSize, parkingSpots);
+        spot.setEmpty(false);
+        return spot;
     }
 
     public synchronized void freeSpot(ParkingSpot spot) {

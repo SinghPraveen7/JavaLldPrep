@@ -8,7 +8,7 @@ public class FirstFreeSpotStrategy implements SpotAllocationStrategy {
     public ParkingSpot getFreeSpot(Size size, List<ParkingSpot> parkingSpots) {
         for (ParkingSpot spot: parkingSpots) {
             if ((spot.getSpotSize() == size) && spot.isEmpty()) {
-                spot.setEmpty(false); return spot;
+                return spot;
             }
         } return null;
     }

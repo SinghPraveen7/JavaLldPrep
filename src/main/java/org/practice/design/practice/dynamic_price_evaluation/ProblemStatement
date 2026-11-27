@@ -1,0 +1,36 @@
+We need to design dynamic pricing evaluation engine.
+
+We have a parking lot and parking lot manager can define there own set of rules for fare calculations
+like night charges, weekend charges, festival charges and upper cap for fare per day for different types of vehicles.
+
+The core requirements would be defining an interface for dynamic rule creation, where clients can define conditions—like
+vehicle type or time of day—and associated actions. Your system must maintain a rule registry to store these configurations
+and provide an evaluation engine that processes an input context—like entry and exit times—against the active rules to
+compute the final charge.
+
+Example to understand the problem statement:
+
+Parking ticket:
+Entry time, exit time, Vehicle type
+
+Fee Rules can be like:
+MAX_FREE_HOUR
+PARKING_FEE
+FEE_UPPEAR_LIMIT
+WEEKEND_CHARGES
+NIGHT_CHARGES
+FESTIVAL_CHARGES
+
+Example:
+1. First hour is free
+2. Bike - 20 rs / hour
+3. Car - 40 rs / hour
+4. Truck - 60 rs / hour
+5. Upper cap for a day (24 hours) :
+Bike - 200 rs
+Car - 400 rs
+Truck - 600 rs
+
+Need to make rules configurable.
+Can onboard N vehicle with N type of rules to calculate fare.
+How to handle race conditions?
